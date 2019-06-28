@@ -11,7 +11,7 @@ import calibrateFunctions as cf
 
 #open camera
 
-cap= cv2.VideoCapture(1)
+cap= cv2.VideoCapture(0)
 
 #get camera name
 
@@ -55,7 +55,7 @@ else: #else take new pictures
             if(found):
                 count+=1
                 savedImages.append(frame)
-                print(count,"pictures saved")
+                print(count,"pictures taken")
         if(character==ord('q')):
             break
    
@@ -64,12 +64,15 @@ if(len(savedImages)<15):
     os.rmdir(camera_directory_name)
     exit(1)
 
-if(len(sys.argv)<2):
+if(len(sys.argv)<3):
     #save new pictures
     os.chdir(camera_directory_name) 
+    print()
+    print("Now saving files")
     for i in range(0,len(savedImages)):
         cv2.imwrite(camera_name+"_"+str(i)+".png",savedImages[i])
-
+    print(len(savedImages),"Images saved")
+print()
 #save calibration file
 cameraMatrix, distortionCoefficients=cf.cameraCalibration(savedImages,cf.CHESSBOARDSIZE,cf.SQUARESIZE)# cameraCalibration(
 if(not cf.saveCameraCalibration(cameraMatrix,distortionCoefficients,camera_name)):
