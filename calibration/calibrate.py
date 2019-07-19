@@ -16,6 +16,7 @@ cap= cv2.VideoCapture(0)
 #get camera name
 
 camera_name= sys.argv[1]
+
 camera_directory_name= camera_name+"_pics"
 
 

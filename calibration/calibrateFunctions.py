@@ -78,25 +78,33 @@ def saveCameraCalibration(cameraMatrix,distortionCoefficients,filename):
 
 
 #returns camera matrix and distance coefficients 
-def loadCameraCalibration(filename,cameraMatrix,distortionCoefficients):
+def loadCameraCalibration(filename):
         f= open(filename,"r")
         if(f.closed):
                 print("Failed to open file:",filename)
-                return False;
+                return [],[];
         #load the camera matrix
+       
         rows,cols=map(int,f.readline().split(","))
-        cameraMatrix=[[0 for x in range(rows)] for y in range(cols)] 
-        for r in range(0,rows):
-                for c in range(0,cols):
-                    cameraMatrix[rows][cols]=int(f.readline())
 
-        rows,cols=map(int,f.readline().split(","))
-        distortionCoefficients=[[0 for x in range(rows)] for y in range(cols)] 
+        cameraMatrix=[[0 for x in range(cols)] for y in range(rows)] 
         for r in range(0,rows):
                 for c in range(0,cols):
-                    distortionCoefficients[rows][cols]=int(f.readline())
+                    line=f.readline().split();
+                   
+                    cameraMatrix[r][c]=float(line[0]);
+
+        
+        rows,cols=map(int,f.readline().split(","))
+        distortionCoefficients=[[0 for x in range(cols)] for y in range(rows)] 
+       
+        for r in range(0,rows):
+                for c in range(cols):
+                    line=f.readline().split();
+                
+                    distortionCoefficients[r][c]=float(line[0])
         f.close()
-        return True
+        return cameraMatrix,distortionCoefficients
         
         
 
