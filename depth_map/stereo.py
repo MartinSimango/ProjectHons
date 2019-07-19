@@ -52,7 +52,7 @@ def undistortImage(image,cam_matrix,dist):
 #method from http://timosam.com/python_opencv_depthimage
 def getDisparity(imgL,imgR):
     # SGBM Parameters -----------------
-    window_size = 3                     # wsize default 3; 5; 7 for SGBM reduced size image; 15 for SGBM full size image (1300px and above); 5 Works nicely
+    window_size = 13                     # wsize default 3; 5; 7 for SGBM reduced size image; 15 for SGBM full size image (1300px and above); 5 Works nicely
 
     left_matcher = cv2.StereoSGBM_create(
     minDisparity=0,
@@ -88,6 +88,7 @@ def getDisparity(imgL,imgR):
 
     filteredImg = cv2.normalize(src=filteredImg, dst=filteredImg, beta=0, alpha=255, norm_type=cv2.NORM_MINMAX);
     filteredImg = np.uint8(filteredImg)
+    
     return filteredImg;
 def getDepth(disparity,new_matrix):
     fx= new_matrix[0][0]
@@ -107,20 +108,22 @@ def getDepth(disparity,new_matrix):
 while(True):
     _,frame_1= cap_1.read()
     _,frame_2= cap_2.read()
-
+    
+    new_imgL=frame_1
+    new_imgR=frame_2
     new_imgL,new_matrix_1,_=undistortImage(frame_1,cam_matrix_1,distortion_coefficients_1);
     new_imgR,new_matrix_2,_=undistortImage(frame_2,cam_matrix_2,distortion_coefficients_2);
-
+  
     disparity= getDisparity(new_imgL,new_imgR);
-    cv2.imshow("cam_1",new_imgL)
-    cv2.imshow("cam_2",new_imgR)
+    #cv2.imshow("cam_1",new_imgL)
+    #cv2.imshow("cam_2",new_imgR)
 
     cv2.imshow("disparity",cv2.resize(disparity,(600,600)))
 
     depth= getDepth(disparity,new_matrix_1)
     cv2.imshow("depth",depth);
 
-    character= cv2.waitKey(60) & 0xff
+    character= cv2.waitKey(10) & 0xff
     if(character==ord('q')):
         break;
     
