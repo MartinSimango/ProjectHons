@@ -7,12 +7,17 @@ import glob #for reading in images from folder
 SQUARESIZE=0.022 #meters (length of square side)
 CHESSBOARDSIZE= (6,9)
 
+# termination criteria
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+
 #read in images from a folder name
 def readImages(folder_name):
         images = [cv2.imread(file) for file in glob.glob(folder_name+"/*.png")]
         return images
 
-#create the known board positions for each picture given the board size and edgeLength of the squarees
+#create the known board positions for each picture given the board size and edgeLength of the squares
+# prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0) 
 def createKnownBoardPositions(size, edgeLength,cornerPositions):
     width,height= size
     for i in range(0,height):
@@ -26,6 +31,8 @@ def getChessBoardCorners(images,allFoundCorners,showResults):
         found,corners= cv2.findChessboardCorners(image,CHESSBOARDSIZE,flags=cv2.CALIB_CB_ADAPTIVE_THRESH| cv2.CALIB_CB_NORMALIZE_IMAGE)
         
         if(found):
+
+                cv2.cornerSubPix(image,corners,(11,11),(-1,-1),criteria)
                 allFoundCorners.append(corners)
         if(showResults):
                 cv2.drawChessboardCorners(image,CHESSBOARDSIZE,corners,found)
@@ -75,7 +82,7 @@ def saveCameraCalibration(cameraMatrix,distortionCoefficients,filename):
 
         f.close()
         return True
-
+        cv2.stereoCalibrate()
 
 #returns camera matrix and distance coefficients 
 def loadCameraCalibration(filename):
@@ -109,3 +116,5 @@ def loadCameraCalibration(filename):
         
 
 
+
+#retval,cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = cv2.stereoCalibrate(objpointsL, imgpointsL, imgpointsR, (320,240)

@@ -120,8 +120,8 @@ while(True):
 
     cv2.imshow("disparity",cv2.resize(disparity,(600,600)))
 
-    depth= getDepth(disparity,new_matrix_1)
-    cv2.imshow("depth",depth);
+    #depth= getDepth(disparity,new_matrix_1)
+    #cv2.imshow("depth",depth);
 
     character= cv2.waitKey(10) & 0xff
     if(character==ord('q')):
