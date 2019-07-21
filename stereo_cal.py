@@ -104,7 +104,7 @@ M1, D1,objPoints_1,imgPoints_1,rvecs_1,tvecs_1=cf.cameraCalibration(savedImages_
 M2, D2,objPoints_2,imgPoints_2,rvecs_2,tvecs_2=cf.cameraCalibration(savedImages_2,cf.CHESSBOARDSIZE,cf.SQUARESIZE)# cameraCalibration(
 
 
-ret,M1,d1,M2,d2,R,T,E,F=cf.stereoCalibration(objPoints_1,imgPoints_1,imgPoints_2,M1,D1,M2,D2)
+ret,M1,d1,M2,d2,R,T,E,F=cf.stereoCalibration(objPoints_1,imgPoints_1,imgPoints_2,M1,D1,M2,D2,savedImages_1[0])
 print("Value of ret was: ",ret)
 os.chdir("../") #go back to the main directory
 

@@ -53,11 +53,11 @@ def cameraCalibration(images,boardSize,edgeLength):
 
         #distortionCoefficients=np.zeros((8,1),dtype=cv2.CV_64F) 
         #camera matrix, distance coefficients, radial vectors and tangential vectors
-        ret, cameraMatrix, distortionCoefficients, rvecs, tvecs = cv2.calibrateCamera(worldSpacePoints,boardImageSpacePoints,boardSize, None, None)
+        ret, cameraMatrix, distortionCoefficients, rvecs, tvecs = cv2.calibrateCamera(worldSpacePoints,boardImageSpacePoints,images[0].shape[::-1], None, None)
         return cameraMatrix, distortionCoefficients,worldSpacePoints,boardImageSpacePoints,rvecs,tvecs
 
 #from https://github.com/bvnayak/stereo_calibration/blob/master/camera_calibrate.py
-def stereoCalibration(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2):
+def stereoCalibration(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2,image):
         flags = 0
         flags |= cv2.CALIB_FIX_INTRINSIC
         # flags |= cv2.CALIB_FIX_PRINCIPAL_POINT
@@ -67,7 +67,8 @@ def stereoCalibration(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2)
         flags |= cv2.CALIB_ZERO_TANGENT_DIST
         stereocalib_criteria = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, 100, 1e-5)
         #ret,M1,d1,M2,d2,R,T,E,F
-        return cv2.stereoCalibrate(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2,CHESSBOARDSIZE,criteria=stereocalib_criteria,flags=flags)
+        #size = image.shp
+        return cv2.stereoCalibrate(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2,image.shape[::-1],criteria=stereocalib_criteria,flags=flags)
 #EDIT
 def saveCameraCalibration(cameraMatrix,distortionCoefficients,filename):  
         f= open(filename+".cal","w") #open file for writing
@@ -123,7 +124,7 @@ def loadCameraCalibration(filename):
                     distortionCoefficients[r][c]=float(line[0])
         f.close()
         return cameraMatrix,distortionCoefficients
-        
+
 def saveStereoCameraCalibration(params,filename):
         f= open(filename+".cal","w")
         if(f.closed):
@@ -161,10 +162,23 @@ def loadStereoCameraCalibration(filename):
         return ret_Matrix
 
 
+def undistortImage(cam_matrix,dist,image):
+    h,  w = image.shape[:2]
+    newcameramtx, roi=cv2.getOptimalNewCameraMatrix(cam_matrix,dist,(w,h),1,(w,h))
+    #undistort
+    new_image=cv2.undistort(image, cam_matrix, dist, None, newcameramtx)
+    # crop the image
+    x,y,w,h = roi
+    dst = dst[y:y+h, x:x+w]
+    return new_image,newcameramtx,dst
+
+def stereoRectifiction(M1,D1,M2,D2,R,T,image):
+        #TODO
+        #R1,R2,P1,P2,Q,validPixROI1,validPIXROI2
+        return cv2.stereoRectify(M1,D1,M2,D2,image.shape[::-1],R,T);
 
 
 
 
 
 
-#retval,cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = cv2.stereoCalibrate(objpointsL, imgpointsL, imgpointsR, (320,240)
