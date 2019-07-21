@@ -54,9 +54,21 @@ def cameraCalibration(images,boardSize,edgeLength):
         #distortionCoefficients=np.zeros((8,1),dtype=cv2.CV_64F) 
         #camera matrix, distance coefficients, radial vectors and tangential vectors
         ret, cameraMatrix, distortionCoefficients, rvecs, tvecs = cv2.calibrateCamera(worldSpacePoints,boardImageSpacePoints,boardSize, None, None)
-        return cameraMatrix, distortionCoefficients
+        return cameraMatrix, distortionCoefficients,worldSpacePoints,boardImageSpacePoints,rvecs,tvecs
 
-
+#from https://github.com/bvnayak/stereo_calibration/blob/master/camera_calibrate.py
+def stereoCalibration(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2):
+        flags = 0
+        flags |= cv2.CALIB_FIX_INTRINSIC
+        # flags |= cv2.CALIB_FIX_PRINCIPAL_POINT
+        flags |= cv2.CALIB_USE_INTRINSIC_GUESS
+        flags |= cv2.CALIB_FIX_FOCAL_LENGTH
+        # flags |= cv2.CALIB_FIX_ASPECT_RATIO
+        flags |= cv2.CALIB_ZERO_TANGENT_DIST
+        stereocalib_criteria = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, 100, 1e-5)
+        #ret,M1,d1,M2,d2,R,T,E,F
+        return cv2.stereoCalibrate(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2,CHESSBOARDSIZE,criteria=stereocalib_criteria,flags=flags)
+#EDIT
 def saveCameraCalibration(cameraMatrix,distortionCoefficients,filename):  
         f= open(filename+".cal","w") #open file for writing
         if(f.closed):
@@ -82,7 +94,6 @@ def saveCameraCalibration(cameraMatrix,distortionCoefficients,filename):
 
         f.close()
         return True
-        cv2.stereoCalibrate()
 
 #returns camera matrix and distance coefficients 
 def loadCameraCalibration(filename):
@@ -113,7 +124,46 @@ def loadCameraCalibration(filename):
         f.close()
         return cameraMatrix,distortionCoefficients
         
-        
+def saveStereoCameraCalibration(params,filename):
+        f= open(filename+".cal","w")
+        if(f.closed):
+                print("Failed to open file:",filename)
+                return False;
+        #write each matrix in params to a file
+        f.write(str(len(params))+"\n")
+        for i in range(len(params)):
+                rows= len(params[i])
+                cols= len(params[i][0])
+                f.write(str(rows)+","+str(cols)+"\n")
+                for r in range(0,rows):
+                        for c in range(0,cols):
+                                val= params[i][r][c]
+                                f.write(str(val)+"\n")
+                        
+        f.close()
+        return True
+
+def loadStereoCameraCalibration(filename):
+        f= open(filename,"r")
+        if(f.closed):
+                print("Failed to open file:",filename)
+                return []; 
+        array_len= int(f.readline().split()[0])
+        ret_Matrix=[]
+        for i in range(array_len):
+                rows,cols=map(int,f.readline().split(","))
+                tmpMatrix=[[0 for x in range(cols)] for y in range(rows)] 
+                for r in range(0,rows):
+                    for c in range(0,cols):
+                        line=f.readline().split();
+                        tmpMatrix[r][c]=float(line[0]); 
+                ret_Matrix.append(tmpMatrix)
+        return ret_Matrix
+
+
+
+
+
 
 
 

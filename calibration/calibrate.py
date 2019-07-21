@@ -75,7 +75,7 @@ if(len(sys.argv)<3):
     print(len(savedImages),"Images saved")
 print()
 #save calibration file
-cameraMatrix, distortionCoefficients=cf.cameraCalibration(savedImages,cf.CHESSBOARDSIZE,cf.SQUARESIZE)# cameraCalibration(
+cameraMatrix, distortionCoefficients,_,_,_,_=cf.cameraCalibration(savedImages,cf.CHESSBOARDSIZE,cf.SQUARESIZE)# cameraCalibration(
 if(not cf.saveCameraCalibration(cameraMatrix,distortionCoefficients,camera_name)):
     print("Failed to save calibration file!")
 
