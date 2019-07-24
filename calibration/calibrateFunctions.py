@@ -29,7 +29,7 @@ def createKnownBoardPositions(size, edgeLength,cornerPositions):
 def getChessBoardCorners(images,allFoundCorners,showResults):
     for image in images:
         found,corners= cv2.findChessboardCorners(image,CHESSBOARDSIZE,flags=cv2.CALIB_CB_ADAPTIVE_THRESH| cv2.CALIB_CB_NORMALIZE_IMAGE)
-        
+        image= cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
         if(found):
 
                 cv2.cornerSubPix(image,corners,(11,11),(-1,-1),criteria)
@@ -53,7 +53,9 @@ def cameraCalibration(images,boardSize,edgeLength):
 
         #distortionCoefficients=np.zeros((8,1),dtype=cv2.CV_64F) 
         #camera matrix, distance coefficients, radial vectors and tangential vectors
-        ret, cameraMatrix, distortionCoefficients, rvecs, tvecs = cv2.calibrateCamera(worldSpacePoints,boardImageSpacePoints,images[0].shape[::-1], None, None)
+
+        img= cv2.cvtColor(images[0],cv2.COLOR_BGR2GRAY)
+        ret, cameraMatrix, distortionCoefficients, rvecs, tvecs = cv2.calibrateCamera(worldSpacePoints,boardImageSpacePoints,img.shape[::-1], None, None)
         return cameraMatrix, distortionCoefficients,worldSpacePoints,boardImageSpacePoints,rvecs,tvecs
 
 #from https://github.com/bvnayak/stereo_calibration/blob/master/camera_calibrate.py
@@ -68,7 +70,9 @@ def stereoCalibration(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2,
         stereocalib_criteria = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, 100, 1e-5)
         #ret,M1,d1,M2,d2,R,T,E,F
         #size = image.shp
-        return cv2.stereoCalibrate(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2,image.shape[::-1],criteria=stereocalib_criteria,flags=flags)
+
+        img= cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+        return cv2.stereoCalibrate(objPoints,img1_points,img2_points,camM1,camD1,camM2,camD2,img.shape[::-1],criteria=stereocalib_criteria,flags=flags)
 #EDIT
 def saveCameraCalibration(cameraMatrix,distortionCoefficients,filename):  
         f= open(filename+".cal","w") #open file for writing
@@ -126,6 +130,7 @@ def loadCameraCalibration(filename):
         return cameraMatrix,distortionCoefficients
 
 def saveStereoCameraCalibration(params,filename):
+        #M1 d1 M2 d2 R T E F
         f= open(filename+".cal","w")
         if(f.closed):
                 print("Failed to open file:",filename)
@@ -145,6 +150,7 @@ def saveStereoCameraCalibration(params,filename):
         return True
 
 def loadStereoCameraCalibration(filename):
+        #M1 d1 M2 d2 R T E F
         f= open(filename,"r")
         if(f.closed):
                 print("Failed to open file:",filename)
@@ -169,13 +175,23 @@ def undistortImage(cam_matrix,dist,image):
     new_image=cv2.undistort(image, cam_matrix, dist, None, newcameramtx)
     # crop the image
     x,y,w,h = roi
-    dst = dst[y:y+h, x:x+w]
+    dst = new_image[y:y+h, x:x+w]
     return new_image,newcameramtx,dst
 
 
 def stereoRectifiction(M1,D1,M2,D2,R,T,image):
         #R1,R2,P1,P2,Q,validPixROI1,validPIXROI2
+        #img= cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
         return cv2.stereoRectify(M1,D1,M2,D2,image.shape[::-1],R,T)
+def stereoUndistortRectifyMap(M1,M2,d1,d2,R,T,imgL,imgR):
+        _,_,P1,P2,_,_,_= stereoRectifiction(M1,d1,M2,d2,R,T,imgL)
+        #img= cv2.cvtColor(imgL,cv2.COLOR_BGR2GRAY)
+        map1_1,map1_2= cv2.initUndistortRectifyMap(M1,d1,None,P1,imgL.shape[::-1],cv2.CV_32FC2) #cv2.CV_32FC2 for last parameter
+        map2_1,map2_2= cv2.initUndistortRectifyMap(M2,d2,None,P2,imgR.shape[::-1],cv2.CV_32FC2) #cv2.CV_32FC2
+        newImgL =cv2.remap(imgL,map1_1,map1_2,cv2.INTER_LINEAR)
+        newImgR =cv2.remap(imgR,map2_1,map2_2,cv2.INTER_LINEAR)
+        return newImgL,newImgR
+
 
 #method from http://timosam.com/python_opencv_depthimage
 def getDisparity(imgL,imgR):
@@ -207,7 +223,7 @@ def getDisparity(imgL,imgR):
         wls_filter.setLambda(lmbda)
         wls_filter.setSigmaColor(sigma)
 
-        print('computing disparity...')
+        #print('computing disparity...')
         displ = left_matcher.compute(imgL, imgR)  # .astype(np.float32)/16
         dispr = right_matcher.compute(imgR, imgL)  # .astype(np.float32)/16
         displ = np.int16(displ)
@@ -217,11 +233,11 @@ def getDisparity(imgL,imgR):
         filteredImg = cv2.normalize(src=filteredImg, dst=filteredImg, beta=0, alpha=255, norm_type=cv2.NORM_MINMAX);
         filteredImg = np.uint8(filteredImg)
 
-        return filteredImg;
+        return filteredImg
 
 #detect and match features in both images
-def detetectAndMatch(imgL,imgR):
-#TODO
+#def detetectAndMatch(imgL,imgR):
+#TOD0
 
 
 

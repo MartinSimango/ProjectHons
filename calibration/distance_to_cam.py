@@ -15,7 +15,7 @@ def find_marker(image):
 
     return cv2.minAreaRect(c)
 
-#knownWidth is width of marker and perWidth is percieved with of 
+#knownWidth is width of marker and perWidth is percieved width of 
 #marker in the image
 def distance_to_camera(knownWidth,focalLength,perWidth):
         return (knownWidth * focalLength)/ perWidth

@@ -12,7 +12,7 @@ import calibrateFunctions as cf
 #open cameras
 
 cap_1= cv2.VideoCapture(0)
-cap_2= cv2.VideoCapture(1)
+cap_2= cv2.VideoCapture(2)
 
 #get camera name
 
@@ -53,17 +53,17 @@ while(True):
     found_2, foundCorners_2= cv2.findChessboardCorners(frame_2,cf.CHESSBOARDSIZE,flags=cv2.CALIB_CB_ADAPTIVE_THRESH| cv2.CALIB_CB_NORMALIZE_IMAGE) 
     #copy the frame to draw on
     foundFrame_1=np.copy(frame_1)
-    foundFrame_1=np.copy(frame_2)
+    foundFrame_2=np.copy(frame_2)
     if(found_1):
         cv2.drawChessboardCorners(foundFrame_1,cf.CHESSBOARDSIZE,foundCorners_1,found_1)
-        cv2.imshow("Frame",foundFrame_1)
+        cv2.imshow("Frame_1",foundFrame_1)
     else:
-        cv2.imshow("Frame",frame_1)
+        cv2.imshow("Frame_1",frame_1)
     if(found_2):
-        cv2.drawChessboardCorners(foundFrame_2,cf.CHESSBOARDSIZE,foundCorners_1,found_1)
-        cv2.imshow("Frame",foundFrame_2)
+        cv2.drawChessboardCorners(foundFrame_2,cf.CHESSBOARDSIZE,foundCorners_2,found_2)
+        cv2.imshow("Frame_2",foundFrame_2)
     else:
-        cv2.imshow("Frame",frame_2)
+        cv2.imshow("Frame_2",frame_2)
 
 
     character= cv2.waitKey(60)&0xff
@@ -118,10 +118,12 @@ params.append(R)
 params.append(T)
 params.append(E)
 params.append(F)
-
+#M1 d1 M2 d2 R T E F
 if(not cf.saveStereoCameraCalibration(params,cal_file)):
     print("Failed to save calibration file!")
+    exit(1)
 
+print("Saved Calibration to "+cal_file+".cal")
 
 #close cameras
 cap_1.release() 
