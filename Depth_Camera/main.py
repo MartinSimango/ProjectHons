@@ -1,39 +1,35 @@
 
 #import necessary libraries
-import pyrealsense2 as rs
+#import pyrealsense2 as rs
+#for image producing
+#pi ip is 146.231.181.162
 import cv2
 import numpy as np
-
-#get all the neccessary information from the camera
-# Configure depth and color streams
-pipeline = rs.pipeline()
-config = rs.config()
-config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+import imagezmq # for recieving images from client
+import imutils
+import sys # for selecting which port to use for server
+import socket # for recieving information from the client about the camera i.e depth_scale camera_intrinsics and depths of keypoints
 
 
+#socket for requesting camera information that is not pictures
+def init_socket(port_num):
+    #CREATE TCP SOCKET
+    server_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 
+    #bind socket
+    server_socket.bind((socket.gethostbyname(),port_num))
 
-#Now read the frames
-pipeline.start(config)
-
-#get the intrinsic parameters from the camera( going to be used to get translation and rotation matrix)
-profile = pipeline.get_active_profile()
-depth_profile = rs.video_stream_profile(profile.get_stream(rs.stream.depth))
-depth_intrinsics = depth_profile.get_intrinsics()
-w, h = depth_intrinsics.width, depth_intrinsics.height
-
-# Getting the depth sensor's depth scale (see rs-align example for explanation)
-depth_sensor = profile.get_device().first_depth_sensor()
-depth_scale = depth_sensor.get_depth_scale()
+    #start listening
+    server_socket.listen(5) 
+    return server_socket
+    
 
 
 #code adapted https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_feature2d/py_feature_homography/py_feature_homography.html
-def detectAndMatch(frame, nextFrame): #detect key points in both frames and match
+def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames and match
     MIN_MATCH_COUNT = 10
     #turn both frames into grayscale
-    grayFrame= cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
-    grayNextFrame= cv2.cvtColor(nextFrame,cv2.COLOR_BGR2GRAY)
+    
 
     #create sift object
     sift = cv2.xfeatures2d.SIFT_create()
@@ -117,61 +113,65 @@ def detectAndMatch(frame, nextFrame): #detect key points in both frames and matc
 
 
 
-prev_color_frame = None
+prev_image = None
 prev_depth_frame = None
 count=0
 total_distance = 0
+RATE=5 #how quick you want the camera to look between frames
+#create image hub and start start
+
+PORT= "tcp://*:"+sys.argv[1]
+imageHub= imagezmq.ImageHub(open_port=PORT) #equivalent to sockets but for recieving images
+server_socket= init_socket(int(sys.argv[1])+1) #start socket for listening to input for camera information
+
+print("Server started!")
+
 while True:
-
-     frames = pipeline.wait_for_frames() #get the frames
-     depth_frame = frames.get_depth_frame() #get the depth frame
-     color_frame = frames.get_color_frame() #get the color frame
+     
+    rpiName,image= imageHub.recv_image() # get image from client
+     
+    imageHub.send_reply(b'OK')
+    image= imutils.resize(image,width=400,height=600)
+  
     
-    
-     if not depth_frame or not color_frame: #if none of the frames are collected continue
-        continue
 
-     # Convert images to numpy arrays
-     depth_image = np.asanyarray(depth_frame.get_data())
-     color_image = np.asanyarray(color_frame.get_data())
-
-     if(count >30): #past the first frame
-         kp_1,kp_2,matchesMask=detectAndMatch(color_image,prev_color_frame)
-         if(matchesMask is not None ):
+    if(count >RATE): #past the first frame
+        kp_1,kp_2,matchesMask=detectAndMatch(image,prev_image)
+        if(matchesMask is not None ):
             distances=[]
-            for i in range(len(matchesMask)):
-                if(matchesMask[i]):
-                    x_1=int(kp_1[i][0][0])
-                    y_1=int(kp_1[i][0][1])
-                    
-                    x_2=int(kp_2[i][0][0])
-                    y_2=int(kp_2[i][0][1])
+        for i in range(len(matchesMask)):
+            if(matchesMask[i]):
+                x_1=int(kp_1[i][0][0])
+                y_1=int(kp_1[i][0][1])
+                
+                x_2=int(kp_2[i][0][0])
+                y_2=int(kp_2[i][0][1])
 
-                    #print(x_1,y_1)
-                    depth_1 = depth_image[y_1,x_1].astype(float)
-                    depth_2 = prev_depth_frame[y_2,x_2].astype(float)
+                #print(x_1,y_1)
+                depth_1 = 0;#depth_image[y_1,x_1].astype(float)
+                depth_2 = 0# prev_depth_frame[y_2,x_2].astype(float)
 
-                    distance = (depth_1 * depth_scale) - (depth_2 *depth_scale)
-                    distances.append(distance)
-            total_distance = np.average(distances) 
-         #match points -
-         #use ransac to get best inliers -
-         # from homography matrix get rotation matrix and translation vectors (using decomposHomography)
-         #compute points cloud for key points 
-         #use points clouds to get rotation and translation matrices
+                distance = 0#(depth_1 * depth_scale) - (depth_2 *depth_scale)
+                distances.append(distance)
+        total_distance = np.average(distances) 
+        #match points -
+        #use ransac to get best inliers -
+        # from homography matrix get rotation matrix and translation vectors (using decomposHomography)
+        #compute points cloud for key points 
+        #use points clouds to get rotation and translation matrices
+
+
+    if(count%RATE==0):
+        prev_image=image.copy()
+        #prev_depth_frame= depth_image.copy()
     
-
-     if(count%30==0):
-        prev_color_frame=color_image.copy()
-        prev_depth_frame= depth_image.copy()
-        
-        print(total_distance)
-     count= count+1
+    #print(total_distance)
+    count= count+1
 
 
 
-
-
+cv2.destroyAllWindows()
+server_socket.close()
     # for y in range(480):
      #       for x in range(640):
       #          dist = depth_frame.get_distance(x, y)
