@@ -14,10 +14,11 @@ from queue import Queue
 
 #some global variables
 FRAME_RATE=15
+RATE=5
 HOST_IP= sys.argv[1]
 PORT= sys.argv[2]
 depth_image=[]
-
+buffer_size=4096
 #cofigure camera
 pipeline = rs.pipeline()
 config= rs.config()
@@ -37,6 +38,13 @@ w,h= depth_intrinsics.width, depth_intrinsics.height
 depth_sensor= profile.get_device().first_depth_sensor()
 depth_scale = depth_sensor.get_depth_scale()
 
+#get camera matrix details
+fx= depth_intrinsics.fx
+fy= depth_intrinsics.fy
+cx= depth_intrinsics.ppx
+cy= depth_intrinsics.ppy
+
+
 
 #start main thread server
 address= "tcp://"+HOST_IP+":"+PORT
@@ -45,20 +53,37 @@ sender = imagezmq.ImageSender(connect_to=address)
 
 def getDepthFromIndices(data):
     #todo
-
+    return
 #thread job
 def socketListen():
+    
+    #create socket
+    sock= socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     #connect to server
-    sock = socket.connect((HOST_IP,int(PORT)+1))
+    sock.connect((HOST_IP,int(PORT)+1))
     #send server some of the camera details
-    data= json.dumps({"depth_scale":depth_scale,"width":w,"height":h ,"frame_rate": FRAME_RATE})
-    data.send(clientData.encode())
+    data= json.dumps({"depth_scale":depth_scale,"width":w,"height":h ,"frame_rate": FRAME_RATE,"rate":RATE,"fx":fx,"fy":fy,"cx":cx,"cy":cy})
+    sock.send(data.encode())
     #return camera information to sensor
-    while True:
-        data=sock.recv(1024) #expect to recieve array of indices to return depth value found in depth_image array
-        #do somthing with that data t 
-        data= getDepthFromIndices(data)
+    print("Send data!");
 
+    while True:
+        data=sock.recv(buffer_size) #expect to recieve array of indices to return depth value found in depth_image array
+        jsonData= json.loads(data.decode())
+        #do somthing with that data t 
+        x1= jsonData.get("x1")
+        x2= jsonData.get("x2")
+        y1= jsonData.get("y1")
+        y2= jsonData.get("y2")
+        depth_1=[]
+        depth_2=[]
+        for i in range(len(x1)):
+            depth_1.append(depth_image[y1[i],x1[i]])
+            depth_2.append(prev_depth_image[y2[i],x2[i]])
+            
+        jsonData = json.dumps({"depth_1": depth_1,"depth_2": depth_2},default=str) #send as strings cause ints are serializable
+        sock.send(jsonData.encode())
+        #data= getDepthFromIndices(data)
 #start thread for listen for request for camera info from server
 t = threading.Thread(target =socketListen)
 t.daemon=True #die when main thread dies
@@ -66,19 +91,10 @@ t.start() # start thread
 
 
 
-#server_socket=init_socket(int(sys.argv[1])) #get the socket number
-
-#print("Server has started...")
-#wait for client to connect
-#clientSocket,address = server_socket.accept()
-#print(f"Connection from {address} !") 
-#send client some json
-#clientData= json.dumps({"depth_scale":depth_scale,"width":w,"height":h })
-#clientSocket.send(clientData.encode())
 
 rpiName = socket.gethostname()
-
-time.sleep(2.0)
+count=0
+#time.sleep(2.0)
 while True:    
     
     
@@ -94,25 +110,16 @@ while True:
     
     depth_image= np.asanyarray(depth_frame.get_data())
     color_image= np.asanyarray(color_frame.get_data())
-    print(1)
     #gray scale frame
     gray_image= cv2.cvtColor(color_image,cv2.COLOR_BGR2GRAY)
     
     #send frame
     sender.send_image(rpiName,gray_image) 
-    #send depth info
-    #sender.send_image(rpiName,depth_image[1:20])
-    print("Sending data") 
+    if(count%RATE==0 ):
+        prev_depth_image=depth_image.copy()
+    if(count>RATE):
+        count=0
+    count= count+1
     
-    #now send the gray image
-    #gray_image_string=str(gray_image.ravel().tolist())
-    #depth_image_string=str(depth_image.ravel().tolist())
-    
-    #remove brackets from string and replace ',' with ''
-    #gray_image_string=gray_image_string[1:len(gray_image_string)-1].replace(',','')
-    #depth_image_string=gray_image_string[1:len(depth_image_string)-1].replace(',','')
-    
- #   clientData= json.dumps({"image":gray_image.tolist(),"depth_matrix":depth_image.tolist()})
-  #  clientSocket.send(clientData.encode())
 
 
