@@ -88,8 +88,10 @@ def calculateOriginOffset(x_p,y_p,depth_2_xy):
     #calculate X and Y change using some trig, 
     # Width  = Z*w/Fx
     # Height = Z*y/Fy
-    x = (depth_2_xy * ( IMAGE_CENTRE[0] - x_p))/fx 
-    y = (depth_2_xy * ( IMAGE_CENTRE[1] - y_p))/fy 
+    #fov=(float(x_p)/image_width) *np.deg2rad(69.4)
+    x = ((depth_2_xy) * ( IMAGE_CENTRE[0] - x_p))/fx 
+    #x = depth_2_xy * np.sin(fov)
+    y = ((depth_2_xy) * ( IMAGE_CENTRE[1] - y_p ))/fy 
 
     return (x,y)
         
@@ -111,23 +113,36 @@ def getCorners(corners): #to give back TL TR BR BL corners for unordered corners
     TR=corners[(index+3)%4]
     return [TL,TR,BL,BR]
 
-def getPoints(xs,ys,NUM_POINTS):
+def getPoints(xs,ys,NUM_POINTS,image):
     retPoints=[]
 
-    retPoints.append([int((xs[0] +xs[2])/2) , int((ys[0]+ys[2])/2)])
+  
+    for i in range(NUM_POINTS):
+        if(xs[0]!=xs[1]):
+            x=random.randrange(xs[0],xs[1])
+        else:
+            x=int((xs[0] +xs[1])/2) 
+        if(ys[0]!=ys[1]):
+            y=random.randrange(ys[0],ys[2])
+        else:
+            y=int((ys[0]+ys[2])/2)
+        retPoints.append([x , y])
+        cv2.circle(image,(x, y), 5, (0,255,0), -1) #just to visualize point
+    #cv2.circle(image,(xs[0], ys[0]), 5, (0,255,0), -1) #just to visualize point
+    #cv2.circle(image,(xs[1], ys[1]), 5, (0,255,0), -1) #just to visualize point
+    #cv2.circle(image,(xs[2], ys[2]), 5, (0,255,0), -1) #just to visualize point
+    #cv2.circle(image,(xs[3], ys[3]), 5, (0,255,0), -1) #just to visualize point
     #retPoints.append([int((xs[0] +xs[1])/3) , int((ys[0]+ys[2])/3)])
 
     
    
-   # for i in range(4):
-        #x_r=random.randrange(xs[0],xs[1])
-        #y_r=random.randrange(ys[0],ys[2])
+   # 
     #    retPoints.append([int(xs[0]),int(ys[0])])
         #retPoints.append([x_r,y_r])
     return retPoints
-def getDepthInfo(corners): #retrieves depth info for marker
+def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
     
-    #NUM_POINTS=5;
+    NUM_POINTS=20;
     #get the y coords
     xs=[]
     ys=[]
@@ -144,7 +159,7 @@ def getDepthInfo(corners): #retrieves depth info for marker
     xs.append(corners[2][0]) # x-coords
     xs.append(corners[3][0])
     #get random points within that range
-    points= getPoints(xs,ys,1)
+    points= getPoints(xs,ys,NUM_POINTS,image)
     for i in range(len(points)):
         x= points[i][0]
         y= points[i][1]
@@ -164,16 +179,19 @@ def getDepthInfo(corners): #retrieves depth info for marker
     dist  = []
     for i in range(len(depth)):
         if(int(depth[i]) != 0):
-            dist.append(int(depth[i])*depth_scale*100)
+            dist.append([int(depth[i])*depth_scale*100])
            
     
 
-    pos=(0,0,0)
+    pos=([0,0,0],0)
     if(len(dist)!=0):
-        dist = np.average(dist)
-        x_coord, y_coord= calculateOriginOffset(points[i][0],points[i][1],dist)
-        pos=(x_coord,y_coord,dist)
-        print("POS: ",pos)
+        dist= np.min(dist)
+        mid_x= int((xs[0] +xs[1])/2) 
+        mid_y= int((ys[0]+ys[2])/2)
+        x_coord, y_coord= calculateOriginOffset(mid_x,mid_y,dist)
+        dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
+        pos=([round(x_coord),round(y_coord),round(dist_orth)],dist) 
+        print("POS: ",id_o,pos)
 
     return pos
     
@@ -189,44 +207,138 @@ def detectMarkerInfo(image):
     if(markerID is not None):
         for i in range(len(markerID)):
             #draw the square around makers
-            aruco.drawAxis(image,cameraMatrix,distCoeffs,r_vect[i],t_vect[i],0.1)
+            #aruco.drawAxis(image,cameraMatrix,distCoeffs,r_vect[i],t_vect[i],0.1)
             aruco.drawDetectedMarkers(image,markerCorners)
             #print(len(markerCorners))
+          
             correctedCorners=getCorners(markerCorners[i][0]) #correct order of corners
-            markerInfo.append((markerID[i][0],getDepthInfo(correctedCorners))) #add coords to specific object identified by markerID
-    canTrianguatle = (len(markerID) >= 2)
+            pos=getDepthInfo(correctedCorners,markerID[i][0],image)
+            if(pos!=([0,0,0],0)):
+                markerInfo.append((markerID[i][0],pos)) #add coords to specific object identified by markerID
+          
+    canTrianguatle = (len(markerInfo) >= 2) 
     return markerInfo, canTrianguatle      
             
+def distBetweenVectors(A,B):
+    #B is assummed to be further
+    
+    x_change= np.square(B[0]-A[0])
+    zorth_change= np.square(B[3] -A[3])
+    return np.sqrt(x_change+zorth_change)
 
-def calculateCamPosition(objects_detected,image):
+
+def calculateCamPosition(objects_detected):
     tri= False
     new_objects_detected=[]
     while(not tri):
+        _,image= imageHub.recv_image() # get image from client
+        imageHub.send_reply(b'OK')
+        image= imutils.resize(image,width=image_width,height=image_height)
+        print("Looking...")
         new_objects_detected , tri = detectMarkerInfo(image) #look at camera whilst at new angle
     #do some calculations with new_objects and old objects
-    id_1,pos_1= new_objects_detected[0][0], new_objects_detected[0][1] 
-    id_2,pos_2= new_objects_detected[1][0], new_objects_detected[1][1]
-    #match this id's with previous seen objects
-    x_s=[]
-    y_s=[]
-    z_s=[]
+        id_1=objects_detected[0][0]
+        id_2=objects_detected[1][0]
     #get the corresponding points
-    corressponding=[]
-    sorted_objects_z = [] #for sorting closets objects from camera points if facing z direction
-    sorted_objects_x = [] #for sorting closets objects from camera points if facing x direction
-    for i in range(len(objects_detected)):
+        corressponding=[None] *2 #gives corresponding index of new_objects in already objects detected
         for j in range(len(new_objects_detected)):
-            if(objects_detected[j][0]==new_objects_detected[i][0]): #same object 
-                corressponding.append(i,j) # object i in new objects is the same object is object j
-                sorted_objects_z.append(new)
-                sorted_objects_x.append()
-                break #found corresponding object now find next one
+            if(id_1==new_objects_detected[j][0]): #same object 
+                corressponding[0]=j # object i in new objects is the same object is object j
+            if(id_2==new_objects_detected[j][0]): #found corresponding object now find next one
+                corressponding[1]=j
+      
+    #create triangle where C is camera and A and B are other positions
+    print("Can triangulate!!!")
+    new_A_vec = new_objects_detected[corressponding[0]][1][0] # position of A with camera at origin
+    new_B_vec = new_objects_detected[corressponding[1]][1][0]
     
-    #assuming facing 1 direction (z direction)
-    #sort objects by distance
-    sorted_objects =  
+    A= objects_detected[0][1][0]
+    B= objects_detected[1][1][0]
+    x1,y1,z1 = A 
+    
+    A=[x1,z1]
+    x2,y2,z2 = B
+    
+    B=[x2,z2]
+    A_mag=  np.linalg.norm(A)
+    B_mag=  np.linalg.norm(B)
+    A_dot_B= np.dot(A,B)
 
-    #cross check not valid check facing other direction(x direction)
+    current_A_y=  new_objects_detected[corressponding[0]][1][0][1]
+
+    new_C_vec = [0,0]
+    new_A_vec =[new_A_vec[0],new_A_vec[2]]
+    new_B_vec =[new_B_vec[0],new_B_vec[2]]
+    print("A",new_A_vec)
+    print("B",new_B_vec)
+    
+    AB= np.subtract(new_A_vec,new_B_vec)
+    AC= np.subtract(new_A_vec , new_C_vec)
+    BA = np.subtract(new_B_vec , new_A_vec)
+    BC = np.subtract(new_B_vec , new_C_vec)
+    #find angle between AC and AB (using dot product) AC dot AB =|AC||AB|cosa where
+    #a is angle between AC and AB
+    #b is angle between BC and BA
+    AC_mag= np.linalg.norm(AC) 
+    AB_mag=np.linalg.norm(AB)
+    BC_mag= np.linalg.norm(BC)
+    BA_mag= np.linalg.norm(BA)
+    # print("AB:",AB)
+    # print("AC:",AC)
+    # print("BC:",BC)
+    # print("BA:",BA)
+    a = np.arccos(np.dot(AB,AC)/(AB_mag*AC_mag))
+    ao = np.arccos(np.dot(A,AC)/(A_mag*AC_mag))
+    #a= np.rad2deg(a)
+    #b= np.rad2deg(b)
+    #a = np.deg2rad(round(a))
+    #b=  np.deg2rad(round(b))
+    
+    
+    
+
+    #have angles between vectors now wer need to find C true position
+    # in relation to the origin need to find x1 y1 and z3 of C in relation to origin
+    
+    #we know AB dot AC = |AB||AC|cosa 
+    # and we know BA dot BC = |BC||BA|cosb
+    # and we know |AB cross AC| dot BC = 0 as we know this vectors form a triangle and hence will lie on 1 plane
+    
+    
+    # we have 3 unknows x3,y3 and z3 using some linearly algebra solving these
+    # we can find them  
+    # which gives us
+    #{ (x1-x2).(x2-x3) + (y1-y2).(y2-y3) + (z1-z2).(z2-z3) = |AC||AB|cosa }
+    #form matrix to solve position of camera relative to origin
+    #Mp = S
+
+    #get neccesary values to compute position
+    
+    #place holders to make things easier
+  
+    M= np.matrix([ [x2-x1,z2-z1],
+                 [-x1,-z2]])
+    print("a",np.rad2deg(a))
+    #print("b",np.rad2deg(ao))
+ 
+    S11=AB_mag*AC_mag*np.cos(a) - np.square(A_mag) + A_dot_B
+    S12=A_mag*AC_mag*np.cos(ao) - np.square(A_mag) 
+    S= np.array([S11,S12])
+    S.shape=(2,1)
+    print("M:",M)
+    print("S:",S)
+    #M_inverse= np.linalg.inv(M)
+    #cameraPos= M_inverse * S 
+    #print("O:",cameraPos)
+   
+    m=np.linalg.lstsq(M, S,rcond=None)[0]
+    z_dist=np.sqrt(np.square(m[0,0]) +np.square(m[1,0]))
+    
+    y_change= y1 - current_A_y 
+    new_pos= ([m[0,0],y_change,m[1,0]],z_dist)
+    print("Cam Pos: ",new_pos)
+    return new_pos
+
             
     
 objects_detected=[]
@@ -241,14 +353,15 @@ while True:
     
     if(not triangulate): #detect objects if you cant trianglute
         objects_detected,triangulate=detectMarkerInfo(image)
-    if(triangulate): #enough points known to triangluate camera position
-        print("Can triangulate")
+        if(triangulate): #enough points known to triangluate camera position
+            print("Can triangulate")
     
     
 
     cv2.imshow('Webcam',image)
     if(cv2.waitKey(30)==ord('t')):
-        calculateCamPosition(objects_detected,image)
+        print("Attemting to find")
+        calculateCamPosition(objects_detected)
 
 cv2.destroyAllWindows()
 server_socket.close()
