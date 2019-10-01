@@ -89,9 +89,9 @@ def calculateOriginOffset(x_p,y_p,depth_2_xy):
     # Width  = Z*w/Fx
     # Height = Z*y/Fy
     #fov=(float(x_p)/image_width) *np.deg2rad(69.4)
-    x = ((depth_2_xy) * ( IMAGE_CENTRE[0] - x_p))/fx 
+    x = ((depth_2_xy) * ( cx - x_p))/fx 
     #x = depth_2_xy * np.sin(fov)
-    y = ((depth_2_xy) * ( IMAGE_CENTRE[1] - y_p ))/fy 
+    y = ((depth_2_xy) * ( cy- y_p ))/fy 
 
     return (x,y)
         
@@ -142,7 +142,7 @@ def getPoints(xs,ys,NUM_POINTS,image):
     return retPoints
 def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
     
-    NUM_POINTS=20;
+    NUM_POINTS=50;
     #get the y coords
     xs=[]
     ys=[]
@@ -190,7 +190,7 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
         mid_y= int((ys[0]+ys[2])/2)
         x_coord, y_coord= calculateOriginOffset(mid_x,mid_y,dist)
         dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
-        pos=([round(x_coord),round(y_coord),round(dist_orth)],dist) 
+        pos=([int(x_coord),int(y_coord),int(dist_orth)],dist) 
         print("POS: ",id_o,pos)
 
     return pos
@@ -216,7 +216,7 @@ def detectMarkerInfo(image):
             if(pos!=([0,0,0],0)):
                 markerInfo.append((markerID[i][0],pos)) #add coords to specific object identified by markerID
           
-    canTrianguatle = (len(markerInfo) >= 2) 
+    canTrianguatle = (len(markerInfo) >= 3) 
     return markerInfo, canTrianguatle      
             
 def distBetweenVectors(A,B):
@@ -225,6 +225,133 @@ def distBetweenVectors(A,B):
     x_change= np.square(B[0]-A[0])
     zorth_change= np.square(B[3] -A[3])
     return np.sqrt(x_change+zorth_change)
+
+def calculatePossiblePosition(objects_detected,new_objects_detected,corressponding):
+    
+    new_A_vec = new_objects_detected[corressponding[0]][1][0] # position of A with camera at origin
+    new_B_vec = new_objects_detected[corressponding[1]][1][0]
+
+    #object A and B absolute positions
+    A= objects_detected[0][1][0]
+    B= objects_detected[1][1][0]
+    x1,_,z1 = A 
+
+    A=[x1,z1]
+
+    x2,_,z2 = B
+
+    B=[x2,z2]
+    A_mag=  np.linalg.norm(A)
+    B_mag=  np.linalg.norm(B)
+
+
+    new_C_vec = [0,0]
+    new_A_vec =[new_A_vec[0],new_A_vec[2]]
+    new_B_vec =[new_B_vec[0],new_B_vec[2]]
+    print("A",new_A_vec)
+    print("B",new_B_vec)
+
+   
+    AC= np.subtract(new_A_vec , new_C_vec)
+   
+    BC = np.subtract(new_B_vec , new_C_vec)
+    
+    AC_mag= np.linalg.norm(AC) 
+   
+    BC_mag= np.linalg.norm(BC)
+
+
+    a_= 2*x1
+    b_= 2*z1
+    C_= np.square(A_mag) - np.square(AC_mag)
+    d_= 2*x2 
+    e_= 2*z2
+    F_ =np.square(B_mag) - np.square(BC_mag)
+    M_= e_-b_
+    N_= F_-C_
+    O_= d_-a_
+
+    P_= np.square(M_) + np.square(O_)
+    Q_= -d_*np.square(M_) - 2*N_*O_ + e_*M_*O_
+    R_= np.square(N_) - e_*M_*N_ + F_*np.square(M_)
+    
+    #Px^2 + Qx +R=0
+    #apply quadrict formula to solve for possible positions for x
+   
+    x3_1= (-Q_ + (np.sqrt(np.square(Q_)-4*P_*R_)) ) / (2*P_)
+    x3_2= (-Q_ - (np.sqrt(np.square(Q_)-4*P_*R_)) ) / (2*P_)
+    z3_1= float('nan')
+    z3_2= float('nan')
+    if(not math.isnan(x3_1) and not math.isnan(x3_2)):
+        x3_1= int(x3_1)
+        x3_2= int(x3_2)
+        z3_1= int((N_-x3_1*O_) /M_)
+        z3_2= int((N_-x3_2*O_) /M_)
+    
+    pos_1= (x3_1,z3_1)
+    pos_2= (x3_2,z3_2)
+    print("Pos 1: ",pos_1)
+    print("POS 2: ",pos_2)
+    return pos_1,pos_2
+
+def calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding):
+    new_A_vec = new_objects_detected[corressponding[0]][1][0] # position of A with camera at origin
+    new_B_vec = new_objects_detected[corressponding[1]][1][0]
+    new_C_vec = new_objects_detected[corressponding[2]][1][0]
+
+    #object A and B absolute positions
+    A= objects_detected[0][1][0]
+    B= objects_detected[1][1][0]
+    C= objects_detected[2][1][0]
+    
+    x1,_,z1 = A 
+    A=[x1,z1]
+
+    x2,_,z2 = B
+    B=[x2,z2]
+
+    x3,_,z3 = C 
+    C=[x3,z3]
+
+  
+    A_mag=  np.linalg.norm(A)
+    B_mag=  np.linalg.norm(B)
+    C_mag=  np.linalg.norm(C)
+
+
+    new_D_vec = [0,0] # where camera is
+    new_A_vec =[new_A_vec[0],new_A_vec[2]]
+    new_B_vec =[new_B_vec[0],new_B_vec[2]]
+    new_C_vec =[new_C_vec[0],new_C_vec[2]]
+    print("A",new_A_vec)
+    print("B",new_B_vec)
+    print("C",new_C_vec)
+
+    AD= np.subtract(new_A_vec , new_D_vec)
+    BD = np.subtract(new_B_vec , new_D_vec)
+    CD = np.subtract(new_C_vec , new_D_vec)
+
+    AD_mag= np.linalg.norm(AD) 
+    BD_mag= np.linalg.norm(BD)
+    CD_mag= np.linalg.norm(CD)
+
+    #form Matrix to solve problem
+
+    M= np.matrix([[-2*x1,-2*z1],
+                  [-2*x2,-2*z2],
+                  [-2*x3,-2*z3]])
+
+    S= np.array([AD_mag**2-A_mag**2,BD_mag**2-B_mag**2,CD_mag**2-C_mag**2])
+    S.shape=(3,1)
+        
+
+    pos_x_y = np.linalg.lstsq(M, S,rcond=None)[0]
+    pos=  (int(pos_x_y[0,0]),int(pos_x_y[1,0]))
+    print("Abs pos ",pos)
+
+    return pos
+
+
 
 
 def calculateCamPosition(objects_detected):
@@ -236,109 +363,36 @@ def calculateCamPosition(objects_detected):
         image= imutils.resize(image,width=image_width,height=image_height)
         print("Looking...")
         new_objects_detected , tri = detectMarkerInfo(image) #look at camera whilst at new angle
-    #do some calculations with new_objects and old objects
-        id_1=objects_detected[0][0]
-        id_2=objects_detected[1][0]
-    #get the corresponding points
-        corressponding=[None] *2 #gives corresponding index of new_objects in already objects detected
-        for j in range(len(new_objects_detected)):
-            if(id_1==new_objects_detected[j][0]): #same object 
-                corressponding[0]=j # object i in new objects is the same object is object j
-            if(id_2==new_objects_detected[j][0]): #found corresponding object now find next one
-                corressponding[1]=j
-      
-    #create triangle where C is camera and A and B are other positions
-    print("Can triangulate!!!")
-    new_A_vec = new_objects_detected[corressponding[0]][1][0] # position of A with camera at origin
-    new_B_vec = new_objects_detected[corressponding[1]][1][0]
-    
-    A= objects_detected[0][1][0]
-    B= objects_detected[1][1][0]
-    x1,y1,z1 = A 
-    
-    A=[x1,z1]
-    x2,y2,z2 = B
-    
-    B=[x2,z2]
-    A_mag=  np.linalg.norm(A)
-    B_mag=  np.linalg.norm(B)
-    A_dot_B= np.dot(A,B)
+        cv2.imshow('Webcam',image)
+        if(cv2.waitKey(30)==ord('s')):
+            return False ,(0,0,0)
+        #get id's of located objects
+        id_s= []
+        for i in range(len(objects_detected)):
+            id_s.append(objects_detected[i][0])
+            
+        #get the corresponding points
+        matches=0
+        corressponding=[None] *3 #gives corresponding index of new_objects in already objects detected
+        for i in range(len(objects_detected)):
+            for j in range(len(new_objects_detected)):
+                if(id_s[i]==new_objects_detected[j][0]): #same object 
+                    corressponding[i]=j # object i in new objects is the same object is object j
+                    matches= matches +1
 
-    current_A_y=  new_objects_detected[corressponding[0]][1][0][1]
+    if(matches<2):
+        print("Could not find at least 2 objects that positions have already been found")
+        return False,(0,0)
+    if(matches==2):#can calculate 2 possible positions for camera
+        print("Can find possible positions")
+        pos_1,pos_2= calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
+    else: #more than three corresponding points can find absolute position
+        print("Can find absolute position")
+        pos= calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding)
 
-    new_C_vec = [0,0]
-    new_A_vec =[new_A_vec[0],new_A_vec[2]]
-    new_B_vec =[new_B_vec[0],new_B_vec[2]]
-    print("A",new_A_vec)
-    print("B",new_B_vec)
-    
-    AB= np.subtract(new_A_vec,new_B_vec)
-    AC= np.subtract(new_A_vec , new_C_vec)
-    BA = np.subtract(new_B_vec , new_A_vec)
-    BC = np.subtract(new_B_vec , new_C_vec)
-    #find angle between AC and AB (using dot product) AC dot AB =|AC||AB|cosa where
-    #a is angle between AC and AB
-    #b is angle between BC and BA
-    AC_mag= np.linalg.norm(AC) 
-    AB_mag=np.linalg.norm(AB)
-    BC_mag= np.linalg.norm(BC)
-    BA_mag= np.linalg.norm(BA)
-    # print("AB:",AB)
-    # print("AC:",AC)
-    # print("BC:",BC)
-    # print("BA:",BA)
-    a = np.arccos(np.dot(AB,AC)/(AB_mag*AC_mag))
-    ao = np.arccos(np.dot(A,AC)/(A_mag*AC_mag))
-    #a= np.rad2deg(a)
-    #b= np.rad2deg(b)
-    #a = np.deg2rad(round(a))
-    #b=  np.deg2rad(round(b))
-    
-    
-    
-
-    #have angles between vectors now wer need to find C true position
-    # in relation to the origin need to find x1 y1 and z3 of C in relation to origin
-    
-    #we know AB dot AC = |AB||AC|cosa 
-    # and we know BA dot BC = |BC||BA|cosb
-    # and we know |AB cross AC| dot BC = 0 as we know this vectors form a triangle and hence will lie on 1 plane
-    
-    
-    # we have 3 unknows x3,y3 and z3 using some linearly algebra solving these
-    # we can find them  
-    # which gives us
-    #{ (x1-x2).(x2-x3) + (y1-y2).(y2-y3) + (z1-z2).(z2-z3) = |AC||AB|cosa }
-    #form matrix to solve position of camera relative to origin
-    #Mp = S
-
-    #get neccesary values to compute position
-    
-    #place holders to make things easier
-  
-    M= np.matrix([ [x2-x1,z2-z1],
-                 [-x1,-z2]])
-    print("a",np.rad2deg(a))
-    #print("b",np.rad2deg(ao))
- 
-    S11=AB_mag*AC_mag*np.cos(a) - np.square(A_mag) + A_dot_B
-    S12=A_mag*AC_mag*np.cos(ao) - np.square(A_mag) 
-    S= np.array([S11,S12])
-    S.shape=(2,1)
-    print("M:",M)
-    print("S:",S)
-    #M_inverse= np.linalg.inv(M)
-    #cameraPos= M_inverse * S 
-    #print("O:",cameraPos)
-   
-    m=np.linalg.lstsq(M, S,rcond=None)[0]
-    z_dist=np.sqrt(np.square(m[0,0]) +np.square(m[1,0]))
-    
-    y_change= y1 - current_A_y 
-    new_pos= ([m[0,0],y_change,m[1,0]],z_dist)
-    print("Cam Pos: ",new_pos)
-    return new_pos
-
+                
+    #if new id found at to new
+    #for i in range(0)
             
     
 objects_detected=[]
