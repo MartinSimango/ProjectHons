@@ -189,7 +189,7 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
            
     
 
-    pos=([0,0,0],0)
+    pos=([0,0],0)
     if(len(dist)!=0):
         dist= np.min(dist)
         mid_x= int((xs[0] +xs[1])/2) 
@@ -325,9 +325,10 @@ def calculatePossiblePosition(objects_detected,new_objects_detected,corresspondi
         x3_2= int(x3_2)
         z3_1= int((N_-x3_1*O_) /M_)
         z3_2= int((N_-x3_2*O_) /M_)
-    
-    pos_1= (x3_1,z3_1)
-    pos_2= (x3_2,z3_2)
+    else:
+        return ([None,None],[None,None]) # cant get valid position
+    pos_1= [x3_1,z3_1]
+    pos_2= [x3_2,z3_2]
     print("Pos 1: ",pos_1)
     print("POS 2: ",pos_2)
     #cant use matrix approach because A[0] is not necessarily in the x direction 
@@ -380,13 +381,17 @@ def calculateAbsolutePosition(objects_detected,new_objects_detected,corresspondi
     S.shape=(3,1)
         
 
-    pos_x_y = np.linalg.lstsq(M, S,rcond=None)[0]
-    pos=  (int(pos_x_y[0,0]),int(pos_x_y[1,0]))
+    pos_x_z = np.linalg.lstsq(M, S,rcond=None)[0]
+    pos_x = int(pos_x_z[0,0])
+    pos_z = int(pos_x_z[1,0])
+    pos=  ([pos_x,pos_z], distBetweenVectors([pos_x,pos_z],[0,0]))
     print("Abs pos ",pos)
 
     return pos
 
 def getAccuratePos(pos_1,pos_2,posFromVO):
+    if(posFromVO==(None,None)):
+        return (None,None)
     dist_1 = distBetweenVectors(posFromVO,pos_1)
     dist_2 = distBetweenVectors(posFromVO,pos_2)
     if( dist_1 <dist_2): #find the pos closest to the VO position
@@ -398,11 +403,12 @@ def calculateCamPosition(objects_detected,num_seconds,posFromVO):
    
     new_objects_detected=[]
     
-    pos=(0,0)
+    pos=([0,0],0)
+    badPos = ([0,0],0)
     print("Looking...") #trying to triangulate
     new_objects_detected,_, tri = tryTriangulate(image,num_seconds) #look at camera whilst at new angle
     if(not tri): #if can't triangulate after 5 seconds
-        return  
+        return (False, new_objects_detected,badPos)
    
 
   
@@ -421,7 +427,12 @@ def calculateCamPosition(objects_detected,num_seconds,posFromVO):
     if(matches==2):#can calculate 2 possible positions for camera
         print("Can find possible positions")
         pos_1,pos_2= calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
+        if(pos_1 == [None,None] or pos_2 == [None,None]):
+            return  (False, new_objects_detected,badPos)
         pos= getAccuratePos(pos_1,pos_2,posFromVO) #now using the feature matcher get the correct position out of the two
+        if(pos==[None,None]):
+            return (False, new_objects_detected,badPos)
+        pos = (pos,distBetweenVectors(pos,[0,0]))
     else: #more than three corresponding points can find absolute position
         print("Can find absolute position")
         pos= calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding)
@@ -442,7 +453,7 @@ rpiName,image= imageHub.recv_image() # get image from client
 imageHub.send_reply(b'OK')
 image= imutils.resize(image,width=image_width,height=image_height)
 frames_recieved=  frames_recieved +1
-
+VO_pos= (None,None)
 objects_detected,object_ids, _ = tryTriangulate(image,5,True)
 
 def updateObjectDetected(POS,new_objects_detected):
@@ -474,13 +485,14 @@ while True: #continously get frames and update the camera position
     if(frames_recieved > 1): #now we have two consecutive frames (VO)
          kp_1,kp_2,matchesMask,H=vo.detectAndMatch(image,prev_image) # get the matching key points in 
          VO_pos= vo.getPositionFromKeyPoints(sock,kp_1,kp_2,matchesMask,depth_scale,fx) # perform VO
+         print("VO: ",VO_pos)
     
               
     cv2.imshow('Webcam',image)
 
     if(cv2.waitKey(30)==ord('t')):
         print("Attemting to find")
-        CAM_POS,triangulate, new_objects= calculateCamPosition(objects_detected,num_seconds) # num of seconds to try find the camera position
+        triangulate, new_objects,CAM_POS= calculateCamPosition(objects_detected,num_seconds,VO_pos) # num of seconds to try find the camera position
         if(triangulate):
             print("Calculated position from triangulation",CAM_POS)
             print("Updating new objects found(if any) using triangulation measurements")
