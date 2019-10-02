@@ -20,6 +20,8 @@ import socket # for recieving information from the client about the camera i.e d
 import json
 import math 
 import random
+import time #for timing purposes
+import visualOdometry as vo
 buffer_size=4096 #max size of data sent
 
 (X,Y,Z)= (0.0,0.0,0.0) #starting coords #camera coords
@@ -62,7 +64,7 @@ depth_scale   = jsonData.get("depth_scale")
 image_width   = jsonData.get("width") 
 image_height  = jsonData.get("height") 
 frame_rate    = jsonData.get("frame_rate") 
-rate          = jsonData.get("rate") 
+rate          = jsonData.get("rate")  # controls how fast should the server request client for depth information for key points
 fx            = jsonData.get("fx")
 fy            = jsonData.get("fy")
 cx            = jsonData.get("cx")
@@ -142,7 +144,7 @@ def getPoints(xs,ys,NUM_POINTS,image):
     return retPoints
 def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
     
-    NUM_POINTS=50;
+    NUM_POINTS=50
     #get the y coords
     xs=[]
     ys=[]
@@ -167,6 +169,10 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
         x_send.append(x)
         y_send.append(y)
     
+
+    jsonData =  json.dumps({"Request": "Tri_Depth"}) #first tell client what you are requesting
+    sock.send(jsonData.encode())
+
     jsonData = json.dumps({"x":x_send,"y":y_send})  
     sock.send(jsonData.encode())
           
@@ -190,7 +196,7 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
         mid_y= int((ys[0]+ys[2])/2)
         x_coord, y_coord= calculateOriginOffset(mid_x,mid_y,dist)
         dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
-        pos=([int(x_coord),int(y_coord),int(dist_orth)],dist) 
+        pos=([int(x_coord),int(dist_orth)],dist) 
         print("POS: ",id_o,pos)
 
     return pos
@@ -199,32 +205,67 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
 
 
 
-def detectMarkerInfo(image):
+def tryTriangulate(image,num_seconds,max_find=False): #try finding objects for num_seconds seconds #try finding max objects
 
-    markerCorners,markerID, rejectedCandidates = aruco.detectMarkers(image,markerDictionary)
-    r_vect,t_vect, _ =aruco.estimatePoseSingleMarkers(markerCorners,arucoSquareDimension,cameraMatrix,distCoeffs)
-    markerInfo=[] # number of identified markers
-    if(markerID is not None):
-        for i in range(len(markerID)):
-            #draw the square around makers
-            #aruco.drawAxis(image,cameraMatrix,distCoeffs,r_vect[i],t_vect[i],0.1)
-            aruco.drawDetectedMarkers(image,markerCorners)
-            #print(len(markerCorners))
-          
-            correctedCorners=getCorners(markerCorners[i][0]) #correct order of corners
-            pos=getDepthInfo(correctedCorners,markerID[i][0],image)
-            if(pos!=([0,0,0],0)):
-                markerInfo.append((markerID[i][0],pos)) #add coords to specific object identified by markerID
-          
-    canTrianguatle = (len(markerInfo) >= 3) 
-    return markerInfo, canTrianguatle      
+    canTriangulate= False
+    
+    #move funcionality to tryTriangulate
+    start_time = time.time()
+    objects_currently_detected = []
+    object_ids_current =[]
+    while(not canTriangulate):
+    
+        markerCorners,markerID, rejectedCandidates = aruco.detectMarkers(image,markerDictionary)
+        r_vect,t_vect, _ =aruco.estimatePoseSingleMarkers(markerCorners,arucoSquareDimension,cameraMatrix,distCoeffs)
+        markerInfo=[] # number of identified markers
+        markerID=[]
+        if(markerID is not None):
+            for i in range(len(markerID)):
+                #draw the square around makers
+                #aruco.drawAxis(image,cameraMatrix,distCoeffs,r_vect[i],t_vect[i],0.1)
+                aruco.drawDetectedMarkers(image,markerCorners)
+                #print(len(markerCorners))
+            
+                correctedCorners=getCorners(markerCorners[i][0]) #correct order of corners
+                pos=getDepthInfo(correctedCorners,markerID[i][0],image)
+                if(pos!=([0,0,0],0)):
+                    markerInfo.append((markerID[i][0],pos)) #add coords to specific object identified by markerID
+                    markerID.append(markerID[i][0])
+        
+        if(len(markerInfo)>len(objects_currently_detected)):
+            objects_currently_detected = markerInfo.copy()
+            object_ids_current = markerID.copy()
+        canTriangulate = (len(objects_currently_detected) >= 2) 
+
+        if(max_find) : #keep looking
+            canTriangulate=False
+    
+        if(time.time()-start_time >num_seconds): #time is up stop trying to triangulate and switch to something eles 
+            if(len(objects_currently_detected)>=2): #incase we have max_find ends up estting can_triangulate right before time is up
+                canTriangulate= True   
+            break
+        
+        print("Number Objects found so far: ",len(objects_currently_detected))
+        
+        if(not canTriangulate): #if you can't triangulate keep looking for more obects
+            _,image= imageHub.recv_image() # get next image from client to try triangulate 
+            imageHub.send_reply(b'OK')
+            image= imutils.resize(image,width=image_width,height=image_height)
+            cv2.imshow('Webcam',image)  
+            if(cv2.waitKey(30)==ord('s')): #stop looking
+                break
+
+
+    return objects_currently_detected,object_ids_current, canTriangulate      
             
 def distBetweenVectors(A,B):
     #B is assummed to be further
     
     x_change= np.square(B[0]-A[0])
-    zorth_change= np.square(B[3] -A[3])
-    return np.sqrt(x_change+zorth_change)
+    z_change= np.square(B[1]-A[1])
+    return np.sqrt(x_change+z_change) #dist between A and B
+
+
 
 def calculatePossiblePosition(objects_detected,new_objects_detected,corressponding):
     
@@ -234,20 +275,17 @@ def calculatePossiblePosition(objects_detected,new_objects_detected,corresspondi
     #object A and B absolute positions
     A= objects_detected[0][1][0]
     B= objects_detected[1][1][0]
-    x1,_,z1 = A 
+    x1,z1 = A 
 
-    A=[x1,z1]
+   
 
-    x2,_,z2 = B
-
-    B=[x2,z2]
+    x2,z2 = B
     A_mag=  np.linalg.norm(A)
     B_mag=  np.linalg.norm(B)
 
 
     new_C_vec = [0,0]
-    new_A_vec =[new_A_vec[0],new_A_vec[2]]
-    new_B_vec =[new_B_vec[0],new_B_vec[2]]
+
     print("A",new_A_vec)
     print("B",new_B_vec)
 
@@ -292,6 +330,7 @@ def calculatePossiblePosition(objects_detected,new_objects_detected,corresspondi
     pos_2= (x3_2,z3_2)
     print("Pos 1: ",pos_1)
     print("POS 2: ",pos_2)
+    #cant use matrix approach because A[0] is not necessarily in the x direction 
     return pos_1,pos_2
 
 def calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding):
@@ -304,14 +343,12 @@ def calculateAbsolutePosition(objects_detected,new_objects_detected,corresspondi
     B= objects_detected[1][1][0]
     C= objects_detected[2][1][0]
     
-    x1,_,z1 = A 
-    A=[x1,z1]
+    x1,z1 = A 
 
-    x2,_,z2 = B
-    B=[x2,z2]
-
-    x3,_,z3 = C 
-    C=[x3,z3]
+    x2,z2 = B
+  
+    x3,z3 = C 
+   
 
   
     A_mag=  np.linalg.norm(A)
@@ -320,9 +357,7 @@ def calculateAbsolutePosition(objects_detected,new_objects_detected,corresspondi
 
 
     new_D_vec = [0,0] # where camera is
-    new_A_vec =[new_A_vec[0],new_A_vec[2]]
-    new_B_vec =[new_B_vec[0],new_B_vec[2]]
-    new_C_vec =[new_C_vec[0],new_C_vec[2]]
+
     print("A",new_A_vec)
     print("B",new_B_vec)
     print("C",new_C_vec)
@@ -351,145 +386,121 @@ def calculateAbsolutePosition(objects_detected,new_objects_detected,corresspondi
 
     return pos
 
+def getAccuratePos(pos_1,pos_2,posFromVO):
+    dist_1 = distBetweenVectors(posFromVO,pos_1)
+    dist_2 = distBetweenVectors(posFromVO,pos_2)
+    if( dist_1 <dist_2): #find the pos closest to the VO position
+        return pos_1
+    return pos_2
 
 
-
-def calculateCamPosition(objects_detected):
-    tri= False
+def calculateCamPosition(objects_detected,num_seconds,posFromVO):
+   
     new_objects_detected=[]
-    while(not tri):
-        _,image= imageHub.recv_image() # get image from client
-        imageHub.send_reply(b'OK')
-        image= imutils.resize(image,width=image_width,height=image_height)
-        print("Looking...")
-        new_objects_detected , tri = detectMarkerInfo(image) #look at camera whilst at new angle
-        cv2.imshow('Webcam',image)
-        if(cv2.waitKey(30)==ord('s')):
-            return False ,(0,0,0)
-        #get id's of located objects
-        id_s= []
-        for i in range(len(objects_detected)):
-            id_s.append(objects_detected[i][0])
-            
-        #get the corresponding points
-        matches=0
-        corressponding=[None] *3 #gives corresponding index of new_objects in already objects detected
-        for i in range(len(objects_detected)):
-            for j in range(len(new_objects_detected)):
-                if(id_s[i]==new_objects_detected[j][0]): #same object 
-                    corressponding[i]=j # object i in new objects is the same object is object j
-                    matches= matches +1
+    
+    pos=(0,0)
+    print("Looking...") #trying to triangulate
+    new_objects_detected,_, tri = tryTriangulate(image,num_seconds) #look at camera whilst at new angle
+    if(not tri): #if can't triangulate after 5 seconds
+        return  
+   
+
+  
+    #get the corresponding points
+    matches=0
+    corressponding=[None] *3 #gives corresponding index of new_objects in already objects detected
+    for i in range(len(objects_detected)):
+        for j in range(len(new_objects_detected)):
+            if(object_ids[i]==new_objects_detected[j][0]): #same object 
+                corressponding[i]=j # object i in new objects is the same object is object j
+                matches= matches +1
 
     if(matches<2):
         print("Could not find at least 2 objects that positions have already been found")
-        return False,(0,0)
+        return (False,new_objects_detected,pos)
     if(matches==2):#can calculate 2 possible positions for camera
         print("Can find possible positions")
         pos_1,pos_2= calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
+        pos= getAccuratePos(pos_1,pos_2,posFromVO) #now using the feature matcher get the correct position out of the two
     else: #more than three corresponding points can find absolute position
         print("Can find absolute position")
         pos= calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding)
 
-                
-    #if new id found at to new
-    #for i in range(0)
-            
+    return  (True,new_objects_detected, pos )     
+
+
     
-objects_detected=[]
-triangulate=False
-while True:
+frames_recieved = 0
+copyPreviousFrame= True
+num_seconds=5
+CAM_POS=(0,0)
+
+
+#first get initial objects
+rpiName,image= imageHub.recv_image() # get image from client
+    
+imageHub.send_reply(b'OK')
+image= imutils.resize(image,width=image_width,height=image_height)
+frames_recieved=  frames_recieved +1
+
+objects_detected,object_ids, _ = tryTriangulate(image,5,True)
+
+def updateObjectDetected(POS,new_objects_detected):
+    #if new id found at to new
+    for i in range(len(new_objects_detected)):
+        id_i=new_objects_detected[i][0]
+        if( id_i not in  object_ids ): # new object
+            x=  new_objects_detected[i][1][0][0]
+            z=  new_objects_detected[i][1][0][1]
+            #now translate coords into absolute coords
+            new_x= POS[0]+x
+            new_z= POS[1]+z
+            dist= np.sqrt(new_x**2+new_z**2)
+            new_pos=([new_x,new_z],dist)
+            #add new object 
+            print("New object found absolute coords are: ",new_pos)
+            objects_detected.append((id_i,new_pos))
+            object_ids.append(id_i)
+
+
+while True: #continously get frames and update the camera position
      
     rpiName,image= imageHub.recv_image() # get image from client
      
     imageHub.send_reply(b'OK')
     image= imutils.resize(image,width=image_width,height=image_height)
+    frames_recieved=  frames_recieved +1
     
+    if(frames_recieved > 1): #now we have two consecutive frames (VO)
+         kp_1,kp_2,matchesMask,H=vo.detectAndMatch(image,prev_image) # get the matching key points in 
+         VO_pos= vo.getPositionFromKeyPoints(sock,kp_1,kp_2,matchesMask,depth_scale,fx) # perform VO
     
-    if(not triangulate): #detect objects if you cant trianglute
-        objects_detected,triangulate=detectMarkerInfo(image)
-        if(triangulate): #enough points known to triangluate camera position
-            print("Can triangulate")
-    
-    
-
+              
     cv2.imshow('Webcam',image)
+
     if(cv2.waitKey(30)==ord('t')):
         print("Attemting to find")
-        calculateCamPosition(objects_detected)
+        CAM_POS,triangulate, new_objects= calculateCamPosition(objects_detected,num_seconds) # num of seconds to try find the camera position
+        if(triangulate):
+            print("Calculated position from triangulation",CAM_POS)
+            print("Updating new objects found(if any) using triangulation measurements")
+            updateObjectDetected(CAM_POS,new_objects) # if new objects (landmarks) were found in the new frame give them positions
+        else: #can triangulate so use reading from VO
+            if(frames_recieved > 1):
+                print("Calculate position from VO:", (vo.VO_X,vo.VO_Z))
+                print("Updating new objects found(if any) using VO measurements")
+                updateObjectDetected(VO_pos,new_objects)
+            else:
+                print("Too early to say anything about cam position")
+
+
+    if(copyPreviousFrame):    #when to get previous frame ()
+        prev_image=image.copy()
+    if(cv2.waitKey(30)==ord('q')): 
+        break
+
 
 cv2.destroyAllWindows()
 server_socket.close()
 
 
-
-    # if(count == rate): #past the first frame
-    #     total_distance=0 
-    #     distances_pos=[]
-    #     distances_neg=[]
-    #     keyPoint_indices=[]
-    #     kp_1,kp_2,matchesMask,H=detectAndMatch(image,prev_image)
-    #     if(matchesMask is not None ):
-    #         x1_s=[]
-    #         x2_s=[]
-    #         y1_s=[]
-    #         y2_s=[]
-    #         for i in range(len(matchesMask)):
-    #             if(matchesMask[i]): #if a good match after and in RANSAC model
-
-    #                 x_1=int(round(kp_1[i][0][0]))
-    #                 y_1=int(round(kp_1[i][0][1]))
-                
-    #                 x_2=int(round(kp_2[i][0][0]))
-    #                 y_2=int(round(kp_2[i][0][1]))
-                    
-    #                 x1_s.append(x_1)
-    #                 x2_s.append(x_2)
-    #                 y1_s.append(y_1)
-    #                 y2_s.append(y_2)
-    #                 keyPoint_indices.append(i)
-    #             if(len(x1_s)==MAX_DEPTH_POINTS): #only get up to 20 matching points max
-    #                 break
-    #                 #send coords off to get back depth
-    #         jsonData = json.dumps({"x1":x1_s,"y1":y1_s,"x2":x2_s,"y2":y2_s})       
-    #         sock.send(jsonData.encode())
-          
-    #         #read depths_back
-    #         data=sock.recv(buffer_size)
-    #         jsonData= json.loads(data.decode())
-            
-    #         depth_1 = jsonData.get("depth_1")
-    #         depth_2 = jsonData.get("depth_2")
-            
-    #         x_change, y_change = calculateDirectionChanges(kp_1,kp_2,keyPoint_indices,depth_2) 
-            
-    #         depth_len = len(depth_1)
-
-    #         for i in range (depth_len):
-    #             if(int(depth_1[i])==0 or int(depth_2[i])==0): #no depth for that point
-    #                 continue
-    #             dist=(int(depth_2[i])-int(depth_1[i]))*depth_scale*100  #get to cm
-    #             if(dist>=0):
-    #                 distances_pos.append(dist)
-    #             else:
-    #                 distances_neg.append(dist)
-    #             #print("Key Points: ",kp_1[i],kp_2[i])  #check to see how similar key points are
-    #             #print("Depth_1: ", int(depth_1[i])*depth_scale*100)
-    #             #print("Depth_2: ", int(depth_2[i])*depth_scale*100)
-              
-               
-           
-    #         if(distances_pos): #some depth measurement in z directions
-    #             total_distance=np.min(distances_pos)
-    #             if(distances_neg):
-    #                 if(abs(np.max(distances_neg))<total_distance):
-    #                     total_distance=np.max(distances_neg)
-    #         #now measure distance change in x and y direction
-    #         #x_change,y_change=calculateDirectionChanges(kp_1,kp_2,matchesMask)
-                   
-              
-              
-    #     #match points -
-    #     #use ransac to get best inliers -
-    #     # from homography matrix get rotation matrix and translation vectors (using decomposHomography)
-    #     #compute points cloud for key points 
-    #     #use points clouds to get rotation and translation matrices
