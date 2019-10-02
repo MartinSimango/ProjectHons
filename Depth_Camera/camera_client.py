@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import json #for sending neat forms of data
 import sys
-from imutils.video import VideoStream
 import imagezmq
 import time
 
@@ -14,7 +13,7 @@ from queue import Queue
 
 #some global variables
 FRAME_RATE=15
-RATE=5
+RATE=20
 HOST_IP= sys.argv[1]
 PORT= sys.argv[2]
 depth_image=[]
@@ -43,7 +42,7 @@ fx= depth_intrinsics.fx
 fy= depth_intrinsics.fy
 cx= depth_intrinsics.ppx
 cy= depth_intrinsics.ppy
-
+dist_coeffs= depth_intrinsics.coeffs
 
 
 #start main thread server
@@ -51,9 +50,14 @@ address= "tcp://"+HOST_IP+":"+PORT
 sender = imagezmq.ImageSender(connect_to=address)
 
 
-def getDepthFromIndices(data):
-    #todo
-    return
+def getTriDepth():
+
+
+
+def getVODepth():
+    x1 = jsonData.get("x1")
+    
+    x1 = jsonData.get("x1")
 #thread job
 def socketListen():
     
@@ -62,7 +66,7 @@ def socketListen():
     #connect to server
     sock.connect((HOST_IP,int(PORT)+1))
     #send server some of the camera details
-    data= json.dumps({"depth_scale":depth_scale,"width":w,"height":h ,"frame_rate": FRAME_RATE,"rate":RATE,"fx":fx,"fy":fy,"cx":cx,"cy":cy})
+    data= json.dumps({"depth_scale":depth_scale,"width":w,"height":h ,"frame_rate": FRAME_RATE,"rate":RATE,"fx":fx,"fy":fy,"cx":cx,"cy":cy,"dist_coeffs":dist_coeffs})
     sock.send(data.encode())
     #return camera information to sensor
     print("Send data!");
@@ -70,18 +74,25 @@ def socketListen():
     while True:
         data=sock.recv(buffer_size) #expect to recieve array of indices to return depth value found in depth_image array
         jsonData= json.loads(data.decode())
+        
+        #depending on what client sends do something differnt
+        request = jsonData.get("Request")
+        if(request=="Tri_Depth"):
+            
+        elif(request=="VO_Depth"):
+
         #do somthing with that data t 
-        x1= jsonData.get("x1")
-        x2= jsonData.get("x2")
-        y1= jsonData.get("y1")
-        y2= jsonData.get("y2")
+        x1= jsonData.get("x")
+       #x2= jsonData.get("x2")
+        y1= jsonData.get("y")
+       # y2= jsonData.get("y2")
         depth_1=[]
-        depth_2=[]
+      #  depth_2=[]
         for i in range(len(x1)):
             depth_1.append(depth_image[y1[i],x1[i]])
-            depth_2.append(prev_depth_image[y2[i],x2[i]])
+            #depth_2.append(prev_depth_image[y2[i],x2[i]])
             
-        jsonData = json.dumps({"depth_1": depth_1,"depth_2": depth_2},default=str) #send as strings cause ints are serializable
+        jsonData = json.dumps({"depth": depth_1},default=str) #send as strings cause ints are serializable
         sock.send(jsonData.encode())
         #data= getDepthFromIndices(data)
 #start thread for listen for request for camera info from server
