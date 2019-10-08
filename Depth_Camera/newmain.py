@@ -217,7 +217,8 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
     
 
 def getKeyPointsDepth(num_seconds):
-    
+    global image
+    global socket_lock
     finished = False
     NUM_KEY_POINTS=25
     start_time = time.time()
@@ -226,22 +227,25 @@ def getKeyPointsDepth(num_seconds):
     while(not finished):
         #image constantly gets changed by main thread
         kp,kp_depth=vo.getKeyPointsDepth(image.copy(),sock,NUM_KEY_POINTS,socket_lock) 
-        for i in range(len(kp)):
+        for i in range(len(kp)): #add the key_points depths values to the array for theis frame
             if kp[i] in key_points.keys():
-                key_points[kp[i]].append(kp_depth[i])
+                if(kp_depth[i] != 0):
+                    key_points[kp[i]].append(kp_depth[i])
             else:
-                key_points[kp[i]]=[kp_depth[i]]
+                if(kp_depth[i] != 0): 
+                    key_points[kp[i]]=[kp_depth[i]]
         if(time.time()-start_time >num_seconds): #time is up stop trying to triangulate and switch to something eles 
             finished = True
     for point in key_points.keys():
         dist = int(np.min(key_points[point])) # get min reading for a point
        # print("Average: ",point,dist)
-        x=point[0]
-        y=point[1]
+        x=round(point[i][0][0])
+        y=round(point[i][0][1])
+
         x_coord,_ = calculateOriginOffset(x,y,dist) # x in cm
         dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
         pos=([int(x_coord),int(dist_orth)],dist) 
-        key_points_ret[(x,y)]=pos
+        key_points_ret[point]=pos
     
     return key_points_ret
     
@@ -290,7 +294,7 @@ def tryTriangulate(image,num_seconds): #try finding objects for num_seconds seco
         #end while loop
     #now the loop is done calculate averages of each object located 
     for i in object_depths.keys():
-        dist = int(np.min(object_depths[i])) # get the average depth reading for that object
+        dist = int(np.min(object_depths[i])) *depth_scale*100 # get the average depth reading for that object in cm
         print("Average: ",i,dist)
         x_coord,_ = calculateOriginOffset(object_mids[i][0],object_mids[i][1],dist)
         dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
@@ -514,15 +518,30 @@ prev_image=image.copy()
 
 
 
-
+#other thread will run this function for ever
 def VOCalculate():
-    frames_captured=0
+    global VO_X
+    global VO_Z
+    global image
+    canVO= False
+    prev_kp=None
+    prev_image= None
+    
     while(1):
         #get frame data for NS seconds
-        if(cv2.waitKey(0)=="v"):
-            kp=getKeyPointsDepth(NS) # get the
+        if(cv2.waitKey(0)=="v"): #wait for v to be
+            kp=getKeyPointsDepth(NS) # get the key points and their depths
+            if(canVO==False):
+                canVO=True
+            else:
+                kp_1, kp_2, matchesMask = vo.detectAndMatch(image,prev_image,kp.keys(),prev_kp.keys())
+                x_change,z_change=vo.calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,depth_scale,fx)
+                VO_X = VO_X + x_change
+                VO_Z = VO_Z + z_change
+            prev_kp=kp.copy()
+            prev_image= image.copy()
             #vo =image # image is constantly being update by main thread so just use this
-
+        
 
 
 #start VO thread

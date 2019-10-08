@@ -10,7 +10,7 @@ import imutils
 import sys # for selecting which port to use for server
 import socket # for recieving information from the client about the camera i.e depth_scale camera_intrinsics and depths of keypoints
 import json
-
+import math 
 buffer_size=4096 #max size of data sent
 (X,Y,Z)= (0.0,0.0,0.0) #starting coords
 
@@ -62,15 +62,76 @@ cy            = jsonData.get("cy")
 print("Received: ", jsonData)
 
 #start recieving images
+#decompose rotation matrix to eular angles
 
 
-def calculateDirectionChanges(H):
-     camera_matrix = np.array([[fx,0,cx],[0,fy,cy],[0,0,1]]) #form the camera matrix
-     _,Rotations,_,_ = cv2.decomposeHomographyMat(H,camera_matrix) #ignore translation and normal matrices
+
+def rotationMatrixToEulerAngles(R) : 
+ 
+    #assert(isRotationMatrix(R))
      
+    sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
+     
+    singular = sy < 1e-6
+ 
+    if  not singular :
+        x = math.atan2(R[2,1] , R[2,2])
+        y = math.atan2(-R[2,0], sy)
+        z = math.atan2(R[1,0], R[0,0])
+    else :
+        x = math.atan2(-R[1,2], R[1,1])
+        y = math.atan2(-R[2,0], sy)
+        z = 0
+ 
+    return x, y, z
 
-     print(Rotations[0])
-     print()
+def calculateDirectionChanges((kp_1,kp_2,keyPoint_indices,depth_2):
+    
+
+    
+    #calculate X and Y change using some trig, 
+    # Width  = Z*w/Fx
+    # Height = Z*y/Fy
+    x_change = []
+    y_change = []
+    for i in range (depth_2):
+        j = keyPoint_indices[i] #kp_index
+        depth_cm= (depth_2[i] * depth_scale*100) #depth to second point in cm's
+        #get x and y positions
+        x_1=int(round(kp_1[j][0][0]))
+        y_1=int(round(kp_1[j][0][1]))
+        
+        x_2=int(round(kp_2[j][0][0]))
+        y_2=int(round(kp_2[j][0][1]))
+         
+        x_c = depth_cm * (x_2-x_1)/fx
+        y_c = depth_cm * (y_2-y_1)/fy
+         #if(x_c < tol  or y _c < tol)# ignore point of change is very small
+        x_change.append(x_c)
+        y_change.append(y_c)
+    return np.average(x_change), np.average(y_change); # return the averages of the testing
+        
+
+    counter=0
+    while (counter < TRIES or counter < len(matchesMask)): #for every point calcuate the change in x and change in y
+        if(matchesMask[i]): 
+            x_1=int(round(kp_1[i][0][0]))
+            y_1=int(round(kp_1[i][0][1]))
+        
+            x_2=int(round(kp_2[i][0][0]))
+            y_2=int(round(kp_2[i][0][1]))
+            
+            x_c=0
+            y_c=0
+            #if(x_c < tol  or y _c < tol)# ignore point of change is very small
+            x_change.append()
+            y_change.append()
+
+    return np.average(x_change), np.average(y_change)
+     #print(rotationMatrixToEulerAngles(Rotations[0]))  
+
+     #print(Rotations[len(Rotations)-1])
+    
      #validate different rotation matrices
 
 
@@ -115,10 +176,12 @@ def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames 
             good.append(m)
 
     # cv2.drawMatchesKnn expects list of lists as matches.
-
+    
+    #return values
     frame_keyPoints = None
     nextFrame_keyPoints = None
     matchesMask = None 
+    H=None
     if len(good)>MIN_MATCH_COUNT:
         #good= good[0:MIN_MATCH_COUNT]
         #only get the key points from within the good list
@@ -128,7 +191,10 @@ def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames 
         #now find the Homography matrix finding the best set of inliers for the matches in
         H, mask = cv2.findHomography(frame_keyPoints, nextFrame_keyPoints, cv2.RANSAC,0.5)
         matchesMask = mask.ravel().tolist()
-        calculateDirectionChanges(H) 
+        camera_matrix = np.array([[fx,0,cx],[0,fy,cy],[0,0,1]]) #form the camera matrix
+        _,Rotations,_,_ = cv2.decomposeHomographyMat(H,camera_matrix) #ignore translation and normal matrices
+        print("R = ",Rotations[0])
+       
  
 
         #img_2 = cv2.polylines(img_2,[np.int32(dst)],True,255,3, cv2.LINE_AA)
@@ -161,7 +227,7 @@ def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames 
     #now get R and T from the homography
       
     cv2.waitKey(1)
-    return (frame_keyPoints, nextFrame_keyPoints, matchesMask)
+    return (frame_keyPoints, nextFrame_keyPoints, matchesMask,H)
 
 
 
@@ -184,7 +250,8 @@ while True:
         total_distance=0 
         distances_pos=[]
         distances_neg=[]
-        kp_1,kp_2,matchesMask=detectAndMatch(image,prev_image)
+        keyPoint_indices=[]
+        kp_1,kp_2,matchesMask,H=detectAndMatch(image,prev_image)
         if(matchesMask is not None ):
             x1_s=[]
             x2_s=[]
@@ -203,6 +270,7 @@ while True:
                     x2_s.append(x_2)
                     y1_s.append(y_1)
                     y2_s.append(y_2)
+                    keyPoint_indices.append(i)
                 if(len(x1_s)==MAX_DEPTH_POINTS): #only get up to 20 matching points max
                     break
                     #send coords off to get back depth
@@ -215,8 +283,11 @@ while True:
             
             depth_1 = jsonData.get("depth_1")
             depth_2 = jsonData.get("depth_2")
+            
+            x_change, y_change = calculateDirectionChanges(kp_1,kp_2,keyPoint_indices,depth_2) 
+            
             depth_len = len(depth_1)
-        
+
             for i in range (depth_len):
                 if(int(depth_1[i])==0 or int(depth_2[i])==0): #no depth for that point
                     continue
@@ -231,12 +302,13 @@ while True:
               
                
            
-            if(distances_pos): #some depth measurement
+            if(distances_pos): #some depth measurement in z directions
                 total_distance=np.min(distances_pos)
                 if(distances_neg):
                     if(abs(np.max(distances_neg))<total_distance):
                         total_distance=np.max(distances_neg)
-             
+            #now measure distance change in x and y direction
+            #x_change,y_change=calculateDirectionChanges(kp_1,kp_2,matchesMask)
                    
               
               
