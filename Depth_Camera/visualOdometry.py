@@ -11,25 +11,28 @@ import sys # for selecting which port to use for server
 import socket # for recieving information from the client about the camera i.e depth_scale camera_intrinsics and depths of keypoints
 import json
 import math 
-buffer_size=4096 #max size of data sent
-(VO_X,VO_Z)= (0.0,0.0) #starting coords for visual odometry
 
-prev_image = None
-prev_depth_frame = None
-count=0
-total_distance = 0
-MAX_DEPTH_POINTS=50 # how many depth points we want to ask for
-#create image hub and start start
+
+
+
+
+
+
 
 
 def calculateDirectionChanges(kp_1,kp_2,keyPoint_indices,depth_2,depth_scale,fx):
     
 
     # Width  = Z*w/Fx
-    x_change = []
+    x_change_pos = []
+    x_change_neg = []
+    total_x_change = 0
+
+
+           
     for i in range (len(depth_2)):
         j = keyPoint_indices[i] #kp_index of i'th depth
-        depth_cm= (depth_2[i] * depth_scale*100) #depth to second point in cm's
+        depth_cm= (int(depth_2[i]) * depth_scale*100) #depth to second point in cm's
         #get x and y positions
         x_1=int(kp_1[j][0][0])
 
@@ -38,14 +41,71 @@ def calculateDirectionChanges(kp_1,kp_2,keyPoint_indices,depth_2,depth_scale,fx)
         
          
         x_c = depth_cm * (x_2-x_1)/fx 
-    
-         #if(x_c < tol  or y _c < tol)# ignore point of change is very small
-        x_change.append(x_c)
+        if(x_c>=0):
+            x_change_pos.append(x_c)
+        else:
+            x_change_neg.append(x_c)
+       
 
-    return np.average(x_change) # return the averages of the testing
+        if(len(x_change_pos)>len(x_change_neg)):
+            total_x_change= np.min(x_change_pos)
+        else: 
+            if(x_change_neg):
+                total_x_change = np.max(x_change_neg)
+              
+    
+
+    
+    return total_x_change # return the averages of the testing
         
 
    
+def getKeyPointsDepth(image,sock,num_key_points,socket_lock,buffer_size=4096):
+    
+    sift = cv2.xfeatures2d.SIFT_create()
+
+    kp, _ = sift.detectAndCompute(image,None)
+    
+    num_p = min(num_key_points,len(kp))
+    kp=kp[:num_p]  #only take a limited amount of key points
+    #now 
+    x_s=[]
+    y_s=[]
+    kp_ret=[]
+    for i in range(len(kp)):
+           
+        x=int(round(kp[i][0][0]))
+        y=int(round(kp[i][0][1]))
+
+        kp_ret.append((x,y))
+        x_s.append(x)
+        y_s.append(y)
+        
+    # end for
+    # not get depth for all x,y coords
+    jsonData =  json.dumps({"Request": "Tri_Depth"}) #first tell client what you are requesting
+    
+    socket_lock.acquire()
+    print("VO thread has lock")
+    
+    sock.send(jsonData.encode())
+    #now send of the request
+    jsonData = json.dumps({"x":x_s,"y":y_s})   
+    sock.send(jsonData.encode())
+    
+    #now measure distance change in x and y direction
+    #x_change,y_change=calculateDirectionChanges(kp_1,kp_2,matchesMask)
+    #read depths_back
+    data=sock.recv(buffer_size)
+    
+    socket_lock.release()
+    print("VO thread has released lock")
+    jsonData= json.loads(data.decode())
+    
+    depths= jsonData.get("depth") 
+    # remove all 0 from depth list
+    return kp_ret, depths
+
 
 
 #code adapted https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_feature2d/py_feature_homography/py_feature_homography.html
@@ -134,7 +194,9 @@ def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames 
 
 
 
-def getPositionFromKeyPoints(sock,kp_1,kp_2,matchesMask,depth_scale,fx): # after some calculate returns the position of the camera
+def getPositionFromKeyPoints(sock,kp_1,kp_2,matchesMask,depth_scale,fx,VO_X,VO_Z,buffer_size=4096): #max size of data sent: # after some calculate returns the position of the camera
+     MAX_DEPTH_POINTS=50 # how many depth points we want to ask for
+     depth_KP= {} #dictionary to keep depths of key points
      if(matchesMask is not None ):
             x1_s=[]
             x2_s=[]
@@ -181,14 +243,31 @@ def getPositionFromKeyPoints(sock,kp_1,kp_2,matchesMask,depth_scale,fx): # after
             
             #now calculate the depth change in z direction
             depth_len = len(depth_1)
-            distances=[]
+            distances_pos=[]
+            distances_neg=[]
+            total_distance=0
             for i in range (depth_len):
                 if(int(depth_1[i])==0 or int(depth_2[i])==0): #no depth for that point
                     continue
                 dist=(int(depth_2[i])-int(depth_1[i]))*depth_scale*100  #get to cm
-                distances.append(dist)
-            
-            z_change =  int(np.average(dist))  
+                if(dist>=0):
+                    distances_pos.append(dist)
+                else:
+                    distances_neg.append(dist)
+               
+            if(len(distances_pos)>len(distances_neg)):
+                total_distance = np.min(distances_pos)
+            else: 
+                if(distances_neg):
+                    total_distance = np.max(distances_neg)
+              
+            mul=1
+            if(int(total_distance)<0):
+                mul=-1
+
+            z_change =  np.square(int(total_distance) -int(x_change)) *mul
+
+            #print("Z_change",z_change)
             VO_X = VO_X + x_change 
             VO_Z = VO_Z + z_change
             return (VO_X,VO_Z)
