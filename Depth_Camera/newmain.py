@@ -41,6 +41,7 @@ PORT= "tcp://*:"+sys.argv[1]
 
 socket_lock = threading.Lock()  #ensures that only one thread using the socket at a time
 
+doVO=False
 #socket for requesting camera information that is not pictures
 def init_socket(port_num):
     #CREATE TCP SOCKET
@@ -87,7 +88,7 @@ markerDictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
 arucoSquareDimension= 0.048 #length of side of square on aruco marker
 
 cameraMatrix = np.array([[fx,0,cx],[0,fy,cy],[0,0,1]]) #form the camera matrix
-IMAGE_CENTRE =(int(image_width)/2,int(image_height)/2)
+IMAGE_CENTRE =((image_width)/2.0,image_height/2.0)
 
 #given x and y in pixel coords get x and y coords in cm's
 def calculateOriginOffset(x_p,y_p,depth_2_xy):
@@ -97,9 +98,9 @@ def calculateOriginOffset(x_p,y_p,depth_2_xy):
     # Width  = Z*w/Fx
     # Height = Z*y/Fy
     #fov=(float(x_p)/image_width) *np.deg2rad(69.4)
-    x = ((depth_2_xy) * ( cx - x_p))/fx 
+    x = ((depth_2_xy) * ( IMAGE_CENTRE[0] - x_p))/fx 
     #x = depth_2_xy * np.sin(fov)
-    y = ((depth_2_xy) * ( cy- y_p ))/fy 
+    y = ((depth_2_xy) * ( IMAGE_CENTRE[1]- y_p ))/fy 
 
     return (x,y)
         
@@ -135,15 +136,15 @@ def getPoints(xs,ys,NUM_POINTS,image):
         else:
             y=int((ys[0]+ys[2])/2)
         retPoints.append([x , y])
-        cv2.circle(image,(x, y), 5, (0,255,0), -1) #just to visualize point
+    cv2.circle(image,(x, y), 5, (0,255,0), -1)          #just to visualize point
     #cv2.circle(image,(xs[0], ys[0]), 5, (0,255,0), -1) #just to visualize point
     #cv2.circle(image,(xs[1], ys[1]), 5, (0,255,0), -1) #just to visualize point
     #cv2.circle(image,(xs[2], ys[2]), 5, (0,255,0), -1) #just to visualize point
     #cv2.circle(image,(xs[3], ys[3]), 5, (0,255,0), -1) #just to visualize point
     #retPoints.append([int((xs[0] +xs[1])/3) , int((ys[0]+ys[2])/3)])
 
-    
-   
+    cv2.imshow('Webcam',image)
+    cv2.waitKey(frame_rate)
    # 
     #    retPoints.append([int(xs[0]),int(ys[0])])
         #retPoints.append([x_r,y_r])
@@ -180,7 +181,7 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
     jsonData =  json.dumps({"Request": "Tri_Depth"}) #first tell client what you are requesting
    
     socket_lock.acquire() #main thread acquire lock
-    print("Main thread has lock")
+    #print("Main thread has lock")
     sock.send(jsonData.encode())
 
     jsonData = json.dumps({"x":x_send,"y":y_send})  
@@ -190,7 +191,7 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
     data=sock.recv(buffer_size)
     
     socket_lock.release()
-    print("Main thread relaeased lock")
+    #print("Main thread relaeased lock")
     jsonData= json.loads(data.decode())
     
     depth = jsonData.get("depth")
@@ -198,21 +199,21 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
     dist  = []
     for i in range(len(depth)):
         if(int(depth[i]) != 0):
-            dist.append([int(depth[i])*depth_scale*100])
+            dist.append([int(depth[i])])
            
     mid_x= int((xs[0] +xs[1])/2) 
     mid_y= int((ys[0]+ys[2])/2)
     depth=0
     #pos=([0,0],0)
     if(len(dist)!=0):
-        depth= int(np.min(dist))
-        
+        depth= np.min(dist)
+    
         #x_coord,_ = calculateOriginOffset(mid_x,mid_y,dist)
         #dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
         #pos=([int(x_coord),int(dist_orth)],dist) 
         #print("POS: ",id_o,pos)
 
-    return mid_x, mid_y, depth
+    return mid_x, mid_y, (depth *depth_scale*100)
     
     
 
@@ -220,7 +221,7 @@ def getKeyPointsDepth(num_seconds):
     global image
     global socket_lock
     finished = False
-    NUM_KEY_POINTS=25
+    NUM_KEY_POINTS=100
     start_time = time.time()
     key_points ={}
     key_points_ret= {}
@@ -228,23 +229,26 @@ def getKeyPointsDepth(num_seconds):
         #image constantly gets changed by main thread
         kp,kp_depth=vo.getKeyPointsDepth(image.copy(),sock,NUM_KEY_POINTS,socket_lock) 
         for i in range(len(kp)): #add the key_points depths values to the array for theis frame
-            if kp[i] in key_points.keys():
+            kp_depth[i]= int(round(kp_depth[i]))
+            if kp[i].pt in key_points.keys():
                 if(kp_depth[i] != 0):
-                    key_points[kp[i]].append(kp_depth[i])
+                    key_points[kp[i]].append(kp_depth[i]*100*depth_scale)
             else:
                 if(kp_depth[i] != 0): 
-                    key_points[kp[i]]=[kp_depth[i]]
+                    key_points[kp[i]]=[kp_depth[i]*100*depth_scale]
         if(time.time()-start_time >num_seconds): #time is up stop trying to triangulate and switch to something eles 
             finished = True
     for point in key_points.keys():
-        dist = int(np.min(key_points[point])) # get min reading for a point
-       # print("Average: ",point,dist)
-        x=round(point[i][0][0])
-        y=round(point[i][0][1])
+        dist = int(round(np.min(key_points[point]))) # get min reading for a point
+        #print("dist",dist)
+        #print("Average: ",point,dist)
+        x=int(round(point.pt[0]))
+        y=int(round(point.pt[1]))
 
         x_coord,_ = calculateOriginOffset(x,y,dist) # x in cm
-        dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
-        pos=([int(x_coord),int(dist_orth)],dist) 
+        x_coord =   int(round(x_coord))
+        dist_orth = int(round(np.sqrt(np.square(dist)-np.square(x_coord))))# essentially  dist_orth = sqrt(z^2-x^2)
+        pos=([x_coord,dist_orth],dist) 
         key_points_ret[point]=pos
     
     return key_points_ret
@@ -260,7 +264,7 @@ def tryTriangulate(image,num_seconds): #try finding objects for num_seconds seco
     object_ids_current =[]
     object_depths= {} #stores all the depths read for a particular object within the n amount of seconds
     object_mids = {}
-   
+    max_seen=0
     while(not finished):
         markerCorners,markerID, rejectedCandidates = aruco.detectMarkers(image,markerDictionary)
         # r_vect,t_vect, _ =aruco.estimatePoseSingleMarkers(markerCorners,arucoSquareDimension,cameraMatrix,distCoeffs)
@@ -281,6 +285,9 @@ def tryTriangulate(image,num_seconds): #try finding objects for num_seconds seco
                     else:
                         object_depths[current_id]=[depth] 
                         object_mids[current_id]=[mid_x,mid_y]
+                    if(len(object_depths[current_id])>max_seen):
+                            max_seen=len(object_depths[current_id])
+               
         if(time.time()-start_time >num_seconds): #time is up stop trying to triangulate and switch to something eles 
             finished = True
         
@@ -294,11 +301,15 @@ def tryTriangulate(image,num_seconds): #try finding objects for num_seconds seco
         #end while loop
     #now the loop is done calculate averages of each object located 
     for i in object_depths.keys():
-        dist = int(np.min(object_depths[i])) *depth_scale*100 # get the average depth reading for that object in cm
+        if(len(object_depths[i])< (max_seen*30) //100):
+            print("YEP:, ",i,len(object_depths[i]),max_seen)
+            continue
+        dist = np.min(object_depths[i])  # get the average depth reading for that object in cm
         print("Average: ",i,dist)
         x_coord,_ = calculateOriginOffset(object_mids[i][0],object_mids[i][1],dist)
-        dist_orth = np.sqrt(np.square(dist)-np.square(x_coord))# essentially  dist_orth = sqrt(z^2-x^2)
-        pos=([int(x_coord),int(dist_orth)],dist) 
+        x_coord =   int(round(x_coord))
+        dist_orth = int(round(np.sqrt(np.square(dist)-np.square(x_coord))))# essentially  dist_orth = sqrt(z^2-x^2)
+        pos=([x_coord,dist_orth],dist) 
         objects_currently_detected.append((i,pos))
         object_ids_current.append(i)
 
@@ -375,10 +386,10 @@ def calculatePossiblePosition(objects_detected,new_objects_detected,corresspondi
         z3_1= float('nan')
         z3_2= float('nan')
         if(not math.isnan(x3_1) and not math.isnan(x3_2)):
-            x3_1= int(x3_1)
-            x3_2= int(x3_2)
-            z3_1= int((N_-x3_1*O_) /M_)
-            z3_2= int((N_-x3_2*O_) /M_)
+            x3_1= int(round(x3_1))
+            x3_2= int(round(x3_2))
+            z3_1= int(round(((N_-x3_1*O_) /M_)))
+            z3_2= int(round(((N_-x3_2*O_) /M_)))
         else:
             return ([None,None],[None,None]) # cant get valid position
     pos_1= [x3_1,z3_1]
@@ -436,8 +447,8 @@ def calculateAbsolutePosition(objects_detected,new_objects_detected,corresspondi
         
 
     pos_x_z = np.linalg.lstsq(M, S,rcond=None)[0]
-    pos_x = int(pos_x_z[0,0])
-    pos_z = int(pos_x_z[1,0])
+    pos_x = int(round((pos_x_z[0,0])))
+    pos_z = int(round((pos_x_z[1,0])))
     pos=  ([pos_x,pos_z], distBetweenVectors([pos_x,pos_z],[0,0]))
     print("Abs pos ",pos)
 
@@ -485,7 +496,8 @@ def calculateCamPosition(objects_detected,num_seconds,posFromVO):
         pos_1,pos_2= calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
         if(pos_1 == [None,None] or pos_2 == [None,None]):
             return  (False, new_objects_detected,badPos)
-        print("Using VO position to find correct pos")
+        posFromVO= (VO_X,VO_Z)
+        print("Using VO position (of {0} )to find correct pos".format(posFromVO))
         pos= getAccuratePos(pos_1,pos_2,posFromVO) #now using the feature matcher get the correct position out of the two
         if(pos==[None,None]):
             return (False, new_objects_detected,badPos)
@@ -523,23 +535,31 @@ def VOCalculate():
     global VO_X
     global VO_Z
     global image
+    global doVO
     canVO= False
     prev_kp=None
     prev_image= None
     
     while(1):
         #get frame data for NS seconds
-        if(cv2.waitKey(0)=="v"): #wait for v to be
+        #print("VOCalulate")
+        if(doVO): #wait for v to be
+            print("Getting key points...")
             kp=getKeyPointsDepth(NS) # get the key points and their depths
+            print("Finished getting key points")
             if(canVO==False):
                 canVO=True
             else:
-                kp_1, kp_2, matchesMask = vo.detectAndMatch(image,prev_image,kp.keys(),prev_kp.keys())
-                x_change,z_change=vo.calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,depth_scale,fx)
+                print("Starting VO")
+                kp_1, kp_2, matchesMask = vo.detectAndMatch(image,prev_image,list(kp.keys()),list(prev_kp.keys()))
+                print("Now calcukating direction change")
+                x_change,z_change=vo.calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,5)
                 VO_X = VO_X + x_change
                 VO_Z = VO_Z + z_change
+                print("Finished VO: ",VO_X,VO_Z)
             prev_kp=kp.copy()
             prev_image= image.copy()
+            doVO=False
             #vo =image # image is constantly being update by main thread so just use this
         
 
@@ -573,7 +593,6 @@ for i in range(len(objects_detected)):
 
 print("Now starting...")
 while True: #continously get frames and update the camera position
-     
     rpiName,image= imageHub.recv_image() # get image from client
      
     imageHub.send_reply(b'OK')
@@ -589,11 +608,11 @@ while True: #continously get frames and update the camera position
     #         VO_Z= VO_pos[1]
          #print("VO: ",VO_pos)
     VO_pos=(0,0)
-              
+         
     cv2.imshow('Webcam',image)
-
-    if(cv2.waitKey(frame_rate)==ord('t')): #try triangulation
-        print("VO: ",VO_pos)
+    key_pressed= cv2.waitKey(frame_rate)
+    if(key_pressed==ord('t')): #try triangulation
+        print("VO: ({0},{1})".format(VO_X,VO_Z))
         print("Attemting to find")
         triangulate, new_objects,CAM_POS= calculateCamPosition(objects_detected,NS,VO_pos) # num of seconds to try find the camera position
         if(triangulate):
@@ -607,8 +626,9 @@ while True: #continously get frames and update the camera position
                 updateObjectDetected(VO_pos,new_objects)
             else:
                 print("Too early to say anything about cam position")
-
-    if(cv2.waitKey(frame_rate)==ord('q')): 
+    if(key_pressed==ord('v')):
+        doVO=True
+    if(key_pressed==ord('q')): 
         break
 
 

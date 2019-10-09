@@ -20,43 +20,52 @@ import math
 
 
 
-def calculateDirectionChanges(kp_1,kp_2,keyPoint_indices,depth_2,depth_scale,fx):
-    
 
-    # Width  = Z*w/Fx
-    x_change_pos = []
-    x_change_neg = []
-    total_x_change = 0
+def calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,num_points):   
 
-
+    #see which kp_1 are in kp and which kp_2 are in prev_kp
+    #just take 5 points
+    x_change = []
+    z_change = []
+    count=0
+    kp_new={}
+    prev_kp_new={}
+    for point in kp.keys():
+        x= int(round(point.pt[0]))
+        y= int(round(point.pt[1]))
+        kp_new[(x,y)] = kp[point]
+    for point in prev_kp.keys():
+        x= int(round(point.pt[0]))
+        y= int(round(point.pt[1]))
+        prev_kp_new[(x,y)] = prev_kp[point]
+    print(len(kp_1))
+    for i in range(len(kp_1)): 
+        if(matchesMask[i]):
            
-    for i in range (len(depth_2)):
-        j = keyPoint_indices[i] #kp_index of i'th depth
-        depth_cm= (int(depth_2[i]) * depth_scale*100) #depth to second point in cm's
-        #get x and y positions
-        x_1=int(kp_1[j][0][0])
+            x_1=int(round(kp_1[i][0][0]))
+            x_2=int(round(kp_2[i][0][0]))
+            z_1=int(round(kp_1[i][0][1]))
+            z_2=int(round(kp_2[i][0][1]))
+          
+            #if points are very close then just
+            if( (x_1,z_1) in kp_new.keys() and (x_2,z_2) in prev_kp_new.keys()):
+                print("YES!")
+                pos_1=kp_new[(x_1,z_1)] # formatta as ([0,1],z),
+                x_1= pos_1[0][0]
+                z_1= pos_1[0][1]
+                pos_2=prev_kp_new[(x_2,z_2)]
+                x_2= pos_2[0][0]
+                z_2= pos_2[0][1]
+                x_change.append(x_2-x_1)
+                z_change.append(z_2-z_1)
+                if(count== num_points):
+                    break
+                count= count +1
 
-        
-        x_2=int(kp_2[j][0][0])
-        
-         
-        x_c = depth_cm * (x_2-x_1)/fx 
-        if(x_c>=0):
-            x_change_pos.append(x_c)
-        else:
-            x_change_neg.append(x_c)
-       
-
-        if(len(x_change_pos)>len(x_change_neg)):
-            total_x_change= np.min(x_change_pos)
-        else: 
-            if(x_change_neg):
-                total_x_change = np.max(x_change_neg)
-              
-    
-
-    
-    return total_x_change # return the averages of the testing
+    if(len(x_change)==0):
+        return (0,0)
+    return int(round(np.average(x_change))), int(round(np.average(z_change)))
+  
         
 
    
@@ -72,10 +81,12 @@ def getKeyPointsDepth(image,sock,num_key_points,socket_lock,buffer_size=4096):
     x_s=[]
     y_s=[]
     kp_ret=[]
+
+
     for i in range(len(kp)):
            
-        x=int(round(kp[i][0][0]))
-        y=int(round(kp[i][0][1]))
+        x=int(round(kp[i].pt[0]))
+        y=int(round(kp[i].pt[1]))
 
         kp_ret.append((x,y))
         x_s.append(x)
@@ -86,7 +97,7 @@ def getKeyPointsDepth(image,sock,num_key_points,socket_lock,buffer_size=4096):
     jsonData =  json.dumps({"Request": "Tri_Depth"}) #first tell client what you are requesting
     
     socket_lock.acquire()
-    print("VO thread has lock")
+    #print("VO thread has lock")
     
     sock.send(jsonData.encode())
     #now send of the request
@@ -99,28 +110,32 @@ def getKeyPointsDepth(image,sock,num_key_points,socket_lock,buffer_size=4096):
     data=sock.recv(buffer_size)
     
     socket_lock.release()
-    print("VO thread has released lock")
+    #print("VO thread has released lock")
     jsonData= json.loads(data.decode())
     
     depths= jsonData.get("depth") 
-    # remove all 0 from depth list
-    return kp_ret, depths
+       
+    depths=list(map(float,depths)) #convert string array to int array
+    return kp, depths
 
 
 
 #code adapted https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_feature2d/py_feature_homography/py_feature_homography.html
-def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames and match
-    MIN_MATCH_COUNT = 50
+def detectAndMatch(grayFrame, grayNextFrame,kp_1,kp_2): #detect key points in both frames and match
+    MIN_MATCH_COUNT = 5
     #turn both frames into grayscale
     
 
     #create sift object
+    
     sift = cv2.xfeatures2d.SIFT_create()
+
     #detect key points
-
-    kp_1, des_1 = sift.detectAndCompute(grayFrame,None)
-    kp_2, des_2 = sift.detectAndCompute(grayNextFrame,None)
-
+    
+    #kp_1, des_1 =   sift.detectAndCompute(grayFrame,None)
+    #kp_2, des_2 = sift.detectAndCompute(grayNextFrame,None)
+    _,des_1 = sift.compute(grayFrame,kp_1)
+    _,des_2 = sift.compute(grayNextFrame,kp_2)
     #img_1=cv2.drawKeypoints(grayFrame,kp_1,frame)
     #img_2=cv2.drawKeypoints(grayNextFrame,kp_1,nextFrame)
 
@@ -151,10 +166,10 @@ def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames 
     # cv2.drawMatchesKnn expects list of lists as matches.
     
     #return values
-    frame_keyPoints = None
-    nextFrame_keyPoints = None
-    matchesMask = None 
-    H=None
+    frame_keyPoints = []
+    nextFrame_keyPoints = []
+    matchesMask = []
+    #H=None
     if len(good)>MIN_MATCH_COUNT:
         #good= good[0:MIN_MATCH_COUNT]
         #only get the key points from within the good list
@@ -175,21 +190,21 @@ def detectAndMatch(grayFrame, grayNextFrame): #detect key points in both frames 
             #x_change,y_change=calculateDirectionChanges(kp_1,kp_2,matchesMask)
    
     #draw the matches
-    img3 = cv2.drawMatches(img_1,kp_1,img_2,kp_2,good,None,**draw_params)
+   # img3 = cv2.drawMatches(img_1,kp_1,img_2,kp_2,good,None,**draw_params)
     #print("Kru", kp_1[0].pt)
     #print(matchesMask[0]))
 
     #img3 = cv2.drawMatchesKnn(img_1,kp_1,img_2,kp_2,good,flags=2,outImg=None)
 
-    images = np.hstack((img_1, img_2))
+    #images = np.hstack((img_1, img_2))
             
 
 
-    cv2.imshow("Frames",images)
+    #cv2.imshow("Frames",images)
    
-      
-    cv2.waitKey(15)
-    return (frame_keyPoints, nextFrame_keyPoints, matchesMask,H)
+    #have 
+    #cv2.waitKey(15)
+    return (frame_keyPoints, nextFrame_keyPoints, matchesMask)
 
 
 
