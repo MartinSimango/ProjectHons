@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 import cv2
+
 import numpy as np
 import imagezmq # for recieving images from client
 import imutils
@@ -22,6 +23,7 @@ import math
 import random
 import time #for timing purposes
 import visualOdometry as vo
+import keyboard
 
 import threading
 
@@ -450,7 +452,10 @@ def calculateAbsolutePosition(objects_detected,new_objects_detected,corresspondi
     pos_x = int(round((pos_x_z[0,0])))
     pos_z = int(round((pos_x_z[1,0])))
     pos=  ([pos_x,pos_z], distBetweenVectors([pos_x,pos_z],[0,0]))
-    print("Abs pos ",pos)
+    print("Abs pos ",pos) #if absolute position is known you can update VO position now
+    #if(VO_X is None):
+    VO_X= pos_x
+    VO_Z= pos_z
 
     return pos
 
@@ -497,7 +502,7 @@ def calculateCamPosition(objects_detected,num_seconds,posFromVO):
         if(pos_1 == [None,None] or pos_2 == [None,None]):
             return  (False, new_objects_detected,badPos)
         posFromVO= (VO_X,VO_Z)
-        print("Using VO position (of {0} )to find correct pos".format(posFromVO))
+        print("Using VO position (of {0}) to find correct pos".format(posFromVO))
         pos= getAccuratePos(pos_1,pos_2,posFromVO) #now using the feature matcher get the correct position out of the two
         if(pos==[None,None]):
             return (False, new_objects_detected,badPos)
@@ -536,14 +541,18 @@ def VOCalculate():
     global VO_Z
     global image
     global doVO
+
     canVO= False
     prev_kp=None
     prev_image= None
-    
+    KP_NUM = 8 # number of key points to look for direction change
     while(1):
         #get frame data for NS seconds
         #print("VOCalulate")
+        if(keyboard.is_pressed('v')):
+            doVO=True
         if(doVO): #wait for v to be
+            print("Starting VO")
             print("Getting key points...")
             kp=getKeyPointsDepth(NS) # get the key points and their depths
             print("Finished getting key points")
@@ -552,10 +561,15 @@ def VOCalculate():
             else:
                 print("Starting VO")
                 kp_1, kp_2, matchesMask = vo.detectAndMatch(image,prev_image,list(kp.keys()),list(prev_kp.keys()))
-                print("Now calcukating direction change")
-                x_change,z_change=vo.calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,5)
-                VO_X = VO_X + x_change
-                VO_Z = VO_Z + z_change
+                print("Now calculating direction change")
+                x_change,z_change=vo.calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,KP_NUM)
+                if(x_change is not None):
+                    VO_X = VO_X + x_change
+                    VO_Z = VO_Z + z_change
+                else:
+                    print("Not enough key points found to update VO position therefore current Position is unknown, try triangulation to find position")
+                    VO_X = None
+                    VO_Z = None
                 print("Finished VO: ",VO_X,VO_Z)
             prev_kp=kp.copy()
             prev_image= image.copy()
@@ -564,10 +578,6 @@ def VOCalculate():
         
 
 
-#start VO thread
-t = threading.Thread(target = VOCalculate)
-t.daemon=True #die when main thread dies
-t.start() # start thread
 
 
 
@@ -592,6 +602,13 @@ for i in range(len(objects_detected)):
     print(objects_detected[i])
 
 print("Now starting...")
+
+#start VO thread
+t = threading.Thread(target = VOCalculate)
+t.daemon=True #die when main thread dies
+t.start() # start thread
+
+
 while True: #continously get frames and update the camera position
     rpiName,image= imageHub.recv_image() # get image from client
      
@@ -626,8 +643,6 @@ while True: #continously get frames and update the camera position
                 updateObjectDetected(VO_pos,new_objects)
             else:
                 print("Too early to say anything about cam position")
-    if(key_pressed==ord('v')):
-        doVO=True
     if(key_pressed==ord('q')): 
         break
 

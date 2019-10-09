@@ -16,11 +16,6 @@ import math
 
 
 
-
-
-
-
-
 def calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,num_points):   
 
     #see which kp_1 are in kp and which kp_2 are in prev_kp
@@ -38,7 +33,7 @@ def calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,num_points):
         x= int(round(point.pt[0]))
         y= int(round(point.pt[1]))
         prev_kp_new[(x,y)] = prev_kp[point]
-    print(len(kp_1))
+    #print(len(kp_1))
     for i in range(len(kp_1)): 
         if(matchesMask[i]):
            
@@ -49,7 +44,7 @@ def calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,num_points):
           
             #if points are very close then just
             if( (x_1,z_1) in kp_new.keys() and (x_2,z_2) in prev_kp_new.keys()):
-                print("YES!")
+                #print("YES!")
                 pos_1=kp_new[(x_1,z_1)] # formatta as ([0,1],z),
                 x_1= pos_1[0][0]
                 z_1= pos_1[0][1]
@@ -63,7 +58,7 @@ def calculateDirectionChanges(kp_1,kp_2,matchesMask,kp,prev_kp,num_points):
                 count= count +1
 
     if(len(x_change)==0):
-        return (0,0)
+        return (None,None)
     return int(round(np.average(x_change))), int(round(np.average(z_change)))
   
         
@@ -211,7 +206,7 @@ def detectAndMatch(grayFrame, grayNextFrame,kp_1,kp_2): #detect key points in bo
 
 def getPositionFromKeyPoints(sock,kp_1,kp_2,matchesMask,depth_scale,fx,VO_X,VO_Z,buffer_size=4096): #max size of data sent: # after some calculate returns the position of the camera
      MAX_DEPTH_POINTS=50 # how many depth points we want to ask for
-     depth_KP= {} #dictionary to keep depths of key points
+    
      if(matchesMask is not None ):
             x1_s=[]
             x2_s=[]
