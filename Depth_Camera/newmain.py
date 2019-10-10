@@ -23,7 +23,9 @@ import math
 import random
 import time #for timing purposes
 import visualOdometry as vo
-import keyboard
+import keyboard #to detect keyboard presses
+import matplotlib.pyplot as plt # plotting map
+
 
 import threading
 
@@ -32,7 +34,7 @@ buffer_size=4096 #max size of data sent
 NS=5
 (VO_X,VO_Z)= (0,0)
 (X,Z)= (0,0) #starting coords #camera coords
-
+canVO= False
 prev_image = None
 prev_depth_frame = None
 count=0
@@ -88,7 +90,8 @@ print("Received: ", jsonData) #get data from camera
 markerCorners=[]
 markerDictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
 arucoSquareDimension= 0.048 #length of side of square on aruco marker
-
+graph_x={}#1000 by 1000 area
+graph_y={}
 cameraMatrix = np.array([[fx,0,cx],[0,fy,cy],[0,0,1]]) #form the camera matrix
 IMAGE_CENTRE =((image_width)/2.0,image_height/2.0)
 
@@ -179,24 +182,7 @@ def getDepthInfo(corners,id_o,image): #retrieves depth info for marker
         y_send.append(y)
     
     
-
-    jsonData =  json.dumps({"Request": "Tri_Depth"}) #first tell client what you are requesting
-   
-    socket_lock.acquire() #main thread acquire lock
-    #print("Main thread has lock")
-    sock.send(jsonData.encode())
-
-    jsonData = json.dumps({"x":x_send,"y":y_send})  
-    sock.send(jsonData.encode())
-          
-    #read depths_back
-    data=sock.recv(buffer_size)
-    
-    socket_lock.release()
-    #print("Main thread relaeased lock")
-    jsonData= json.loads(data.decode())
-    
-    depth = jsonData.get("depth")
+    depth = vo.getDepthFromCamera(x_send,y_send,sock,socket_lock)
    
     dist  = []
     for i in range(len(depth)):
@@ -254,8 +240,91 @@ def getKeyPointsDepth(num_seconds):
         key_points_ret[point]=pos
     
     return key_points_ret
+def addDepthToGraph(start_x,depths,x_s,depth_to_ob):
+    THRESHHOLD=2
+    global graph_x
+    global graph_y
+    for i in range(len(depths)):
+        depths[i]= int(round(depths[i])) *100 *depth_scale #convert to cm
+        if(depths[i]==0): #ignore point at x_s[i]
+            continue
+        x_coord,_ = calculateOriginOffset(x_s[i],0,depths[i])
+        #x_coord =   int(round(x_coord))
+        dist = abs(depths[i]-depth_to_ob)
+        if( (start_x+i) in graph_x.keys()):
+            if(not (x_coord in graph_x[start_x+i])):
+                graph_x[start_x+i].append(x_coord)
+            else:
+                continue
+        else:
+            graph_x[start_x+i] = [x_coord]
+
+        if(dist>=THRESHHOLD):     
+            depths[i] = None    #treat as point at infinity
+        else:
+            depths[i]=int(round(depths[i]))
+        if( (start_x+i) in graph_y.keys()):
+            graph_y[start_x+i].append(depths[i])
+        else:
+            graph_y[start_x+i]=[depths[i]]   
+     
+
     
 
+def graphObjects(objects_currently_detected,object_mids): #do this within thread later 
+    global image
+    global graph_x
+    global graph_y
+    MAX_POINTS =100 
+    #graph should be scatter plot
+    #look left and right from the object see where discontinuties are
+    
+    for i in range(len(objects_currently_detected)):
+        object_id=objects_currently_detected[i][0] #get id object
+        depth_to_object = objects_currently_detected[i][1][1] #distance to object
+        #mid_x =object_mids[object_id][0]
+        mid_y =object_mids[object_id][1]
+
+        #keeping y constant go from pixel 0 to mid_x and mid_x to image_width looking at the depths if the depths to depth consider them the same
+        x_s=[]
+        y_s=[]
+        depths=[]
+        counter = 0
+        startx=0
+        for x in range(image_width):   #from 0 to mid_x
+
+            x_s.append(x)
+            y_s.append(mid_y)
+            counter = counter +1
+            if(counter==MAX_POINTS):  #enough data points to send data off to request for depths
+                counter=0
+                depths=vo.getDepthFromCamera(x_s,y_s,sock,socket_lock)
+                addDepthToGraph(startx,depths,x_s,depth_to_object)
+                x_s=[]
+                y_s=[]
+                startx=x
+        if(len(x_s)>0):
+              depths=vo.getDepthFromCamera(x_s,y_s,sock,socket_lock)
+              addDepthToGraph(startx,depths,x_s,depth_to_object)
+         
+        #now graph the scatter plot
+
+        #colors = np.array([0, 0, 0],[0,0,0])
+        colors = np.array(["black", "green"])
+        area = np.pi*3
+
+        # Plot
+        for points in graph_x.keys():
+            plt.scatter(graph_x[points], graph_y[points], s=area, c=colors[0], alpha=0.5)
+        
+        plt.title('Scatter ')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.ylim(-200, 200)
+        plt.xlim(-200, 200)
+        plt.show()
+
+    
 def tryTriangulate(image,num_seconds): #try finding objects for num_seconds seconds #try finding max objects
 
     finished= False
@@ -303,7 +372,7 @@ def tryTriangulate(image,num_seconds): #try finding objects for num_seconds seco
         #end while loop
     #now the loop is done calculate averages of each object located 
     for i in object_depths.keys():
-        if(len(object_depths[i])< (max_seen*30) //100):
+        if(len(object_depths[i])< (max_seen*30) //100): #exclude false objects detected object must be there atleast 30% of the time
             print("YEP:, ",i,len(object_depths[i]),max_seen)
             continue
         dist = np.min(object_depths[i])  # get the average depth reading for that object in cm
@@ -316,7 +385,8 @@ def tryTriangulate(image,num_seconds): #try finding objects for num_seconds seco
         object_ids_current.append(i)
 
     canTriangulate = len(objects_currently_detected) >=2
-    return objects_currently_detected,object_ids_current, canTriangulate      
+  
+    return objects_currently_detected,object_ids_current,object_mids, canTriangulate      
             
 def distBetweenVectors(A,B):
     #B is assummed to be further
@@ -472,14 +542,14 @@ def getAccuratePos(pos_1,pos_2,posFromVO):
 def calculateCamPosition(objects_detected,num_seconds,posFromVO):
    
     new_objects_detected=[]
-    
+    objects_mid={}
     pos=([0,0],0)
     badPos = ([0,0],0)
     print("Looking...") #trying to triangulate
-    new_objects_detected,_, tri = tryTriangulate(image,num_seconds) #look at camera whilst at new angle
+    new_objects_detected,_,objects_mid,tri = tryTriangulate(image,num_seconds) #look at camera whilst at new angle
     print("New objects Found:",len(new_objects_detected))
     if(not tri): #if can't triangulate after 5 seconds
-        return (False, new_objects_detected,badPos)
+        return (False, new_objects_detected,objects_mid,badPos)
    
 
     
@@ -495,23 +565,25 @@ def calculateCamPosition(objects_detected,num_seconds,posFromVO):
 
     if(matches<2):
         print("Could not find at least 2 objects that positions have already been found")
-        return (False,new_objects_detected,pos)
+        return (False,new_objects_detected,objects_mid,pos)
     if(matches==2):#can calculate 2 possible positions for camera
         print("Can find possible positions")
         pos_1,pos_2= calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
         if(pos_1 == [None,None] or pos_2 == [None,None]):
-            return  (False, new_objects_detected,badPos)
-        posFromVO= (VO_X,VO_Z)
+            return  (False, new_objects_detected,objects_mid,badPos)
+
         print("Using VO position (of {0}) to find correct pos".format(posFromVO))
         pos= getAccuratePos(pos_1,pos_2,posFromVO) #now using the feature matcher get the correct position out of the two
         if(pos==[None,None]):
-            return (False, new_objects_detected,badPos)
+            return (False, new_objects_detected,objects_mid,badPos)
         pos = (pos,distBetweenVectors(pos,[0,0]))
     else: #more than three corresponding points can find absolute position
         print("Can find absolute position")
         pos= calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding)
-
-    return  (True,new_objects_detected, pos )     
+    #found a position at this point
+   
+    
+    return  (True,new_objects_detected,objects_mid, pos )     
 
 
 
@@ -519,7 +591,7 @@ def calculateCamPosition(objects_detected,num_seconds,posFromVO):
     
 frames_recieved = 0
 copyPreviousFrame= True
-num_seconds=5
+num_seconds=5 #number of seconds to look that the same scene
 CAM_POS=(0,0)
 
 
@@ -530,7 +602,7 @@ imageHub.send_reply(b'OK')
 image= imutils.resize(image,width=image_width,height=image_height)
 frames_recieved=  frames_recieved +1
 VO_pos= (None,None)
-objects_detected,object_ids, _ = tryTriangulate(image,NS)
+objects_detected,object_ids,obs_mid , _= tryTriangulate(image,NS)
 prev_image=image.copy()
 
 
@@ -541,8 +613,7 @@ def VOCalculate():
     global VO_Z
     global image
     global doVO
-
-    canVO= False
+    global canVO
     prev_kp=None
     prev_image= None
     KP_NUM = 8 # number of key points to look for direction change
@@ -581,26 +652,40 @@ def VOCalculate():
 
 
 
-def updateObjectDetected(POS,new_objects_detected):
+def updateObjectDetected(POS,new_objects_detected,object_mids): #update graph
     #if new id found at to new
     for i in range(len(new_objects_detected)):
         id_i=new_objects_detected[i][0]
+        x=  new_objects_detected[i][1][0][0]
+        z=  new_objects_detected[i][1][0][1]
+        #now translate coords into absolute coords
+        new_x= POS[0]+x
+        new_z= POS[1]+z
+        dist= np.sqrt(new_x**2+new_z**2)
+        new_pos=([new_x,new_z],dist)
+        #x = ((depth_2_xy) * ( IMAGE_CENTRE[0] - x_p))/fx 
+        #
+        new_mid_x= int(round(IMAGE_CENTRE[0]- ((new_x*fx)/dist)))  #convert from cm to pixles
+        new_mid_y= int(round(IMAGE_CENTRE[1]- ((new_z*fy)/dist)))
+        
+
+        object_mids[id_i]=[new_mid_x,new_mid_y]
+        new_objects_detected[i] = list(new_objects_detected[i]) #tupples are immutable
+        new_objects_detected[i][1]= new_pos
+        
         if( id_i not in  object_ids ): # new object
-            x=  new_objects_detected[i][1][0][0]
-            z=  new_objects_detected[i][1][0][1]
-            #now translate coords into absolute coords
-            new_x= POS[0]+x
-            new_z= POS[1]+z
-            dist= np.sqrt(new_x**2+new_z**2)
-            new_pos=([new_x,new_z],dist)
-            #add new object 
-            print("New object found absolute coords are: ",new_pos)
+            print("New object {0} found absolute coords are: {1} ".format(id_i,new_pos))
             objects_detected.append((id_i,new_pos))
             object_ids.append(id_i)
+        
+            
+    graphObjects(new_objects_detected,object_mids)
+    
 print("Objects Found:",len(objects_detected))
 for i in range(len(objects_detected)):
     print(objects_detected[i])
 
+graphObjects(objects_detected,obs_mid) #graph current objects
 print("Now starting...")
 
 #start VO thread
@@ -624,25 +709,30 @@ while True: #continously get frames and update the camera position
     #         VO_X= VO_pos[0]
     #         VO_Z= VO_pos[1]
          #print("VO: ",VO_pos)
-    VO_pos=(0,0)
          
     cv2.imshow('Webcam',image)
     key_pressed= cv2.waitKey(frame_rate)
     if(key_pressed==ord('t')): #try triangulation
         print("VO: ({0},{1})".format(VO_X,VO_Z))
         print("Attemting to find")
-        triangulate, new_objects,CAM_POS= calculateCamPosition(objects_detected,NS,VO_pos) # num of seconds to try find the camera position
+        posFromVO= (VO_X,VO_Z)
+        triangulate, new_objects,objects_mid,CAM_POS= calculateCamPosition(objects_detected,NS,posFromVO) # num of seconds to try find the camera position
         if(triangulate):
             print("Calculated position from triangulation",CAM_POS)
             print("Updating new objects found(if any) using triangulation measurements")
-            updateObjectDetected(CAM_POS[0],new_objects) # if new objects (landmarks) were found in the new frame give them positions
-        else: #can triangulate so use reading from VO
-            if(frames_recieved > 1):
-                print("Calculate position from VO:", (VO_X,VO_Z))
-                print("Updating new objects found(if any) using VO measurements")
-                updateObjectDetected(VO_pos,new_objects)
-            else:
-                print("Too early to say anything about cam position")
+            updateObjectDetected(CAM_POS[0],new_objects,objects_mid) # if new objects (landmarks) were found in the new frame give them positions
+        else: #can triangulate so use reading from VO  
+            doVO=True #other thread will pick this up and do VO
+            if(not canVO):
+                while(doVO):
+                    pass #wait until VO is done
+                doVO=True
+            while(doVO):
+                pass #wait until VO is done
+            print("Calculate position from VO:", (VO_X,VO_Z))
+            print("Updating new objects found(if any) using VO measurements")
+            posFromVO= (VO_X,VO_Z)
+            updateObjectDetected(posFromVO,new_objects,objects_mid)
     if(key_pressed==ord('q')): 
         break
 
