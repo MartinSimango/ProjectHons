@@ -35,11 +35,13 @@ DIRECTION_FACING='N' # 0 = North 1 = South 2= East 3 = West
 NS=3
 KP_NUM=8
 (VO_X,VO_Z)= (0,0)
-(X,Z)= (0,0) #starting coords #camera coords
+X,Y=(0,0)
 canVO= True
 doVO=False
 prev_image = None
 prev_depth_image = None
+
+blurs=[]
 count=0
 total_distance = 0
 MAX_DEPTH_POINTS=50 # how many depth points we want to ask for
@@ -184,7 +186,7 @@ def isCornerinBox(corners,Box):
 def reject_outliers(data, m=2):
     return data[abs(data - np.mean(data)) < m * np.std(data)]
 
-def getDepthInfo(corners,id_o,boxesFound): #retrieves depth info for marker
+def getDepthInfo(corners): #retrieves depth info for marker
     
     NUM_POINTS=100
     #get the y coords
@@ -225,17 +227,10 @@ def getDepthInfo(corners,id_o,boxesFound): #retrieves depth info for marker
     if(len(dist)!=0):
         depth= int(round(np.average(dist)))
      
-    #now find which box the the corners are in
-    boxRet = []
-    for i in range(len(boxesFound)): #boxesFound is an array of arrays boxesFound[0] is an array of boxes
-        for j in range(len(boxesFound[i])):
-            correctedBox= getCorners(boxesFound[i][j])
-            if(isCornerinBox(corners,correctedBox)):
-                return mid_x, mid_y, depth, correctedBox
-            
+    
                 
 
-    return mid_x, mid_y, depth, boxRet
+    return mid_x, mid_y, depth
     
     
 
@@ -246,11 +241,19 @@ def addDepthToGraph(boxes,depth_to_ob,mids):
     THRESHHOLD=2
     global graph_x
     global graph_y
-    d= [None] * image_width
+    #d= [None] * image_width
+    
+  
+    
+        
+
+
+
     for i in range(len(boxes)): #ith box is ith object
         start= boxes[i][0]
         width= boxes[i][1]
-
+        if(DIRECTION_FACING=='S' or DIRECTION_FACING=='W'):
+            start=start-width
         for x in range(start,start+width):
             #y= mids[i][1]
             #d= depth_image[y][x]*100*depth_scale #depth the that point in the box
@@ -259,8 +262,12 @@ def addDepthToGraph(boxes,depth_to_ob,mids):
             #if(dist>=THRESHHOLD):
             #    d=None
             #else:
-            
             d= depth_to_ob[i]
+            if(DIRECTION_FACING=='E' or DIRECTION_FACING=='W' ): 
+                x,d =d,x
+
+            if(DIRECTION_FACING=='S'):
+                start=start-width
             if((x) in graph_x.keys() and  (x) in graph_x.keys()):
                 if(x in graph_x[x] and d is not None and d in graph_y[x] ): #dont change the same point if it has already been plotted
                     continue
@@ -285,16 +292,19 @@ def graphObjects(objects_currently_detected,object_mids): #do this within thread
     global image
     global graph_x
     global graph_y
-   
+    global mapped
     #graph should be scatter plot
     #look left and right from the object see where discontinuties are
     allBoxes=[]
     depths=[]
     mids=[] #middle of object 
     for i in objects_currently_detected.keys():
+        if(i in mapped.keys()):
+            if(DIRECTION_FACING in mapped[i]): #already mapped for that direction
+                continue
         #depth_to_object_orth = objects_currently_detected[i][1][0][1] #distance to object (orth_dist) #objects_currently_detected[i][1][1]
         depth_to_object = objects_currently_detected[i][0][1]
-        
+       
         start= objects_currently_detected[i][1][0]
         width= objects_currently_detected[i][1][1]
         mid_x =object_mids[i][0]
@@ -313,12 +323,13 @@ def graphObjects(objects_currently_detected,object_mids): #do this within thread
     colors = np.array(["black", "green"])
     area = np.pi*3
 
+    area_cam= area*2
         # Plot
-   
-    for points in graph_x.keys():
-       
+
+    for points in graph_x.keys():  
         plt.scatter(graph_x[points], graph_y[points], s=area, c=colors[0], alpha=0.5)
     
+    plt.scatter(X,Y,s=area_cam, c=colors[1], alpha=0.5)
     plt.title('Scatter ')
     plt.xlabel('x')
     plt.ylabel('y')
@@ -334,21 +345,21 @@ def boxContour(contour,sheet,color,draw):
     if(draw):
         cv2.polylines(sheet,[box],True, color, 2)
     return box
-def filterDepthImage():
+def filterDepthImage(dto): #distance to object
     global depth_image
     depth_image_tmp= depth_image.copy()
     for i in range(len(depth_image)):
         for j in range(len(depth_image[0])):
             depth_cm =int(depth_image[i][j]) * depth_scale *100
             y_height = (depth_cm * ( IMAGE_CENTRE[1] - i ) )/fy  # pixel height from the ground #236.63084547568047
-            if(depth_cm>100 or y_height<-14):  
+            if((depth_cm>dto+2 or depth_cm < dto - 2) or y_height<-14):   #filter out ground and anything futher then dto +2cm
                 depth_image_tmp[i][j]=0
             
 
     #normalize image then blur it to remove rough edges
     mi=np.min(depth_image)
     ma=np.max(depth_image)
-    depth_image_tmp = cv2.normalize(depth_image_tmp, depth_image_tmp, mi, ma, cv2.NORM_MINMAX,dtype=cv2.CV_8UC1)
+    depth_image_tmp = cv2.normalize(depth_image_tmp, depth_image_tmp, mi, ma, cv2.NORM_MINMAX,dtype=cv2.CV_8UC3)
     blur = cv2.GaussianBlur(depth_image_tmp,(5,5),0)
 
     _, contours, _ = cv2.findContours(blur, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE) # now find the contours in the image
@@ -366,10 +377,11 @@ def getObjectWidth(box,depth):
     start_x= int(round(start_x))
     end_x =int(round(end_x))
     width = end_x- start_x
-    return start_x,width
+    return start_x,width,TL_x,TR_x
 
 def tryTriangulate(num_seconds,knownDirection=-1): #try finding objects for num_seconds seconds #try finding max objects
     global image
+    global blurs
     finished= False
     
     #move funcionality to tryTriangulate
@@ -406,47 +418,66 @@ def tryTriangulate(num_seconds,knownDirection=-1): #try finding objects for num_
         
         #print("Number Objects found so far: ",len(object_depths))
         getNextFrame()
-        boxes,blur=filterDepthImage() #find objects boxes around objects should be returned
-        boxesFound.append(boxes)
+        
+
+        #boxes,blur=filterDepthImage() #find objects boxes around objects should be returned
+        #boxesFound.append(boxes)
 
         
 
-     
+    
         cv2.imshow('Webcam',image)  
 
-        cv2.imshow('Blur',blur)  
-
+       
+      
         if(cv2.waitKey(frame_rate)==ord('s')): #stop looking
             break 
         #end while loop 
 
         # remove outliers of aruco markers found
+    blurs=[]
     for i in object_corners.keys():
         if(len(object_corners[i])< (max_seen*30) //100):
                 print("Outlier:, ",i,len(object_corners[i]),max_seen)
                 continue
-        mid_x,mid_y,dist,box=getDepthInfo(object_corners[i][0],i,boxesFound) # returns mid of objects in depths  and
-        if(box==[]):
+        mid_x,mid_y,dist=getDepthInfo(object_corners[i][0])
+
+        #mid_x,mid_y,dist,box=getDepthInfo(object_corners[i][0]) # returns mid of objects in depths  and
+        boxes,blur=filterDepthImage(dist) #find objects boxes around objects should be returned
+        blurs.append(blur)
+        #now find which box the the corners are in
+        correctedBox=[]
+        for j in range(len(boxes)): #find box which marker is in
+            correctedBox= getCorners(boxes[j]) 
+            if(isCornerinBox(object_corners[i][0],correctedBox)):
+                break
+        cv2.imshow('Blur'+str(len(blurs)),blur)  
+        if(correctedBox==[]):
             print("Could not find box for marker!")
             continue
+        start,width,mid_x,_= getObjectWidth(correctedBox,dist) #wich x_coord the object starts at
         object_mids[i]=[mid_x,mid_y]
         print("Average: ",i,dist)
         x_coord,_ = calculateOriginOffset(mid_x,mid_y,dist)
         x_coord =   int(round(x_coord))
         dist_orth = int(round(np.sqrt(np.square(dist)-np.square(x_coord))))# essentially  dist_orth = sqrt(z^2-x^2)
         pos=([x_coord,dist_orth],dist)
-        start,width= getObjectWidth(box,dist) #wich x_coord the object starts at
+        
         objects_currently_detected[i] = (pos,(start,width))
         #objects_currently_detected.append((i,pos,(start,width)))
         object_ids_current.append(i)
 
+
+  
+
+    cv2.waitKey(frame_rate) #stop looking
         
         #now find which 
 
     #now the loop is done calculate averages of each object located 
     
         
-    canTriangulate = len(objects_currently_detected) >=2
+    canTriangulate = len(objects_currently_detected) >=1
   
     return objects_currently_detected,object_ids_current,object_mids, canTriangulate      
             
@@ -466,75 +497,107 @@ def calculatePossiblePosition(objects_detected,new_objects_detected,corresspondi
     
     new_A_vec = new_objects_detected[id_A][0][0] # position of A with camera at origin
     new_B_vec = new_objects_detected[id_B][0][0]
-  
+    
+
+    nx1, nz1= new_A_vec
+    nx2, nz2= new_B_vec
     #object A and B absolute positions
     A= objects_detected[id_A][0][0]
     B= objects_detected[id_B][0][0]
     x1,z1 = A 
+  
 
    
-  
+    
     x2,z2 = B
     A_mag=  np.linalg.norm(A)
     B_mag=  np.linalg.norm(B)
 
-
+    
     new_C_vec = [0,0]
 
+    #Depending on the direction facing t
+    
+  
+    if(DIRECTION_FACING=='E'):
+        nx1,nz1= nz1,nx1 
+        nx2,nz2= nz2,nx2
+    elif(DIRECTION_FACING=='W'):
+        nx1,nz1= nz1,nx1 
+        nx2,nz2= nz2,nx2
+        
+    new_A_vec = [nx1,nz1] 
+    new_B_vec = [nx2,nz2]
     print("A",id_A,new_A_vec)
     print("B",id_B,new_B_vec)
+   
+
 
    
-    AC= np.subtract(new_A_vec , new_C_vec)
+    # AC= np.subtract(new_A_vec , new_C_vec)
    
-    BC = np.subtract(new_B_vec , new_C_vec)
+    # BC = np.subtract(new_B_vec , new_C_vec)
     
-    AC_mag= np.linalg.norm(AC) 
+    # AC_mag= np.linalg.norm(AC) 
    
-    BC_mag= np.linalg.norm(BC)
+    # BC_mag= np.linalg.norm(BC)
 
     
-    a_= 2*x1
-    b_= 2*z1
-    C_= np.square(A_mag) - np.square(AC_mag)
-    d_= 2*x2 
-    e_= 2*z2
-    F_ =np.square(B_mag) - np.square(BC_mag)
-    M_= e_-b_
-    N_= F_-C_
-    O_= d_-a_
+    # a_= 2*x1
+    # b_= 2*z1
+    # C_= np.square(A_mag) - np.square(AC_mag)
+    # d_= 2*x2 
+    # e_= 2*z2
+    # F_ =np.square(B_mag) - np.square(BC_mag)
+    # M_= e_-b_
+    # N_= F_-C_
+    # O_= d_-a_
 
-    P_= np.square(M_) + np.square(O_)
-    Q_= -d_*np.square(M_) - 2*N_*O_ + e_*M_*O_
-    R_= np.square(N_) - e_*M_*N_ + F_*np.square(M_)
-    if(O_==0 ): #x1==x2
-        z3_1=z3_2=0
-        x3_1=0
-        x3_2=a_
-    elif(M_==0): #y1=y2
-        x3_1=x3_2=0
-        z3_1=0
-        z3_2=B_mag
-    else:
-    #Px^2 + Qx +R=0
-    #apply quadrict formula to solve for possible positions for x
-        x3_1= (-Q_ + (np.sqrt(np.square(Q_)-4*P_*R_)) ) / (2*P_)
-        x3_2= (-Q_ - (np.sqrt(np.square(Q_)-4*P_*R_)) ) / (2*P_)
-        z3_1= float('nan')
-        z3_2= float('nan')
-        if(not math.isnan(x3_1) and not math.isnan(x3_2)):
-            x3_1= int(x3_1)
-            x3_2= int(x3_2)
-            z3_1= int(((N_-x3_1*O_) /M_))
-            z3_2= int(((N_-x3_2*O_) /M_))
-        else:
-            return ([None,None],[None,None]) # cant get valid position
-    pos_1= [x3_1,z3_1]
-    pos_2= [x3_2,z3_2]
-    print("Pos 1: ",pos_1)
-    print("POS 2: ",pos_2)
-    #cant use matrix approach because A[0] is not necessarily in the x direction 
-    return pos_1,pos_2
+    # P_= np.square(M_) + np.square(O_)
+    # Q_= -d_*np.square(M_) - 2*N_*O_ + e_*M_*O_
+    # R_= np.square(N_) - e_*M_*N_ + F_*np.square(M_)
+    # if(O_==0 ): #x1==x2
+    #     z3_1=z3_2=0
+    #     x3_1=0
+    #     x3_2=a_
+    # elif(M_==0): #y1=y2
+    #     x3_1=x3_2=0
+    #     z3_1=0
+    #     z3_2=B_mag
+    # else:
+    # #Px^2 + Qx +R=0
+    # #apply quadrict formula to solve for possible positions for x
+    #     print("SQRT",np.square(Q_)-4*P_*R_)
+    #     x3_1= (-Q_ + (np.sqrt(np.square(Q_)-4*P_*R_)) ) / (2*P_)
+    #     x3_2= (-Q_ - (np.sqrt(np.square(Q_)-4*P_*R_)) ) / (2*P_)
+    #     z3_1= float('nan')
+    #     z3_2= float('nan')
+    #     if(not math.isnan(x3_1) and not math.isnan(x3_2)):
+    #         x3_1= int(x3_1)
+    #         x3_2= int(x3_2)
+    #         z3_1= int(((N_-x3_1*O_) /M_))
+    #         z3_2= int(((N_-x3_2*O_) /M_))
+    #     else:
+    #         return ([None,None],[None,None]) # cant get valid position
+    #WILL CHANGE BASED ON DIRECTION
+    width= new_objects_detected[i][1][1]
+    if(DIRECTION_FACING=='S'):
+        x3_1 = (x1+width) + nx1
+        z3_1 = z1 + nz1
+    elif(DIRECTION_FACING=='E'):
+        x3_1 = (x1+width) - nx1
+        z3_1 = z1 + nz1
+    elif(DIRECTION_FACING=='W'):
+        x3_1 = (x1+width) + nx1
+        z3_1 = z1 + nz1
+    elif(DIRECTION_FACING=='N'):
+        x3_1 = (x1+width) + nx1
+        z3_1 = z1 - nz1
+   
+    pos= [x3_1,z3_1]
+    pos=  (pos, int(round(distBetweenVectors([x3_1,z3_1],[0,0]))) )
+    print("Pos",pos)
+    return pos
 
 def calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding):
     id_A= corressponding[0]
@@ -560,13 +623,29 @@ def calculateAbsolutePosition(objects_detected,new_objects_detected,corresspondi
   
     x3,z3 = C 
    
+    if(DIRECTION_FACING=='S'):
+        x1,z1= -x1,-z1 
+        x2,z2= -x2,-z2
+        x3,z3= -x3,-z3
+    elif(DIRECTION_FACING=='E'):
+        x1,z1= z1,x1 
+        x2,z2= z2,x2
+        x3,z3= z3,x3
+    elif(DIRECTION_FACING=='W'):
+        x1,z1= -z1,x1 
+        x2,z2= -z2,x2
+        x3,z3= -z3,x3
+
 
   
     A_mag=  np.linalg.norm(A)
     B_mag=  np.linalg.norm(B)
     C_mag=  np.linalg.norm(C)
 
-
+            
+    new_A_vec = [x1,z1] 
+    new_B_vec = [x2,z2]
+    new_C_vec = [x3,z3]
     new_D_vec = [0,0] # where camera is
 
     print("A",id_A,new_A_vec,)
@@ -610,8 +689,9 @@ def getAccuratePos(pos_1,pos_2,posFromVO):
         return pos_1
     return pos_2
 
-def findCamDirection(objects_detected,new_objects_detected,corresponding): #find in which direction the camera is pointing
+def findCamDirection(new_objects_detected,corresponding): #find in which direction the camera is pointing
     global relations
+    global DIRECTION_FACING
     id_A= corresponding[0]
     id_B= corresponding[1]
   
@@ -624,10 +704,10 @@ def findCamDirection(objects_detected,new_objects_detected,corresponding): #find
 
 
     #object A and B absolute positions
-    A= objects_detected[id_A][0][0]
-    B= objects_detected[id_B][0][0]
+    #A= objects_detected[id_A][0][0]
+    #B= objects_detected[id_B][0][0]
 
-
+    OLD_DIRECTION=  DIRECTION_FACING
     left_right = 1
     front_behind=1
     x1,z1 = new_A_vec
@@ -636,6 +716,53 @@ def findCamDirection(objects_detected,new_objects_detected,corresponding): #find
         left_right = -1 # i is to the left of j
     if ( z1 < z2 ):  # i is behind j
         front_behind=-1
+    #find A and B relation from relations map
+    for i in range(len(relations[id_A])):
+        for j in (relations[id_A][i]).keys():
+            if(j==id_B): #j is object 
+                l_r = relations[id_A][i][j][0] 
+                f_b = relations[id_A][i][j][1]
+                if( l_r ==1 and f_b ==1 ): # A was in front of and on the right of B
+                    if(left_right ==1 and front_behind ==1):
+                        #still the same direction
+                        DIRECTION_FACING = DIRECTION_FACING
+                    elif(left_right ==1 and front_behind ==-1):
+                        DIRECTION_FACING = 'W' # now facing West
+                    elif(left_right ==-1 and front_behind ==1):
+                        DIRECTION_FACING = 'E'
+                    elif(left_right ==-1 and front_behind ==-1):
+                        DIRECTION_FACING = 'S'
+
+                elif ( l_r ==1 and f_b ==-1 ):
+                    if(left_right ==1 and front_behind ==1):
+                        DIRECTION_FACING = 'E'
+                    elif(left_right ==1 and front_behind ==-1):
+                        DIRECTION_FACING = DIRECTION_FACING
+                    elif(left_right ==-1 and front_behind ==1):
+                        DIRECTION_FACING = 'S'
+                    elif(left_right ==-1 and front_behind ==-1):
+                        DIRECTION_FACING = 'W'
+                elif ( l_r ==-1 and f_b ==1 ):
+                    if(left_right ==1 and front_behind ==1):
+                        DIRECTION_FACING = 'W'
+                    elif(left_right ==1 and front_behind ==-1):
+                        DIRECTION_FACING = 'S'
+                    elif(left_right ==-1 and front_behind ==1):
+                        DIRECTION_FACING = DIRECTION_FACING
+                    elif(left_right ==-1 and front_behind ==-1):
+                        DIRECTION_FACING = 'E'
+                elif ( l_r ==-1 and f_b ==-1 ):
+                    if(left_right ==1 and front_behind ==1):
+                        DIRECTION_FACING = 'S'
+                    elif(left_right ==1 and front_behind ==-1):
+                        DIRECTION_FACING = 'E'
+                    elif(left_right ==-1 and front_behind ==1):
+                        DIRECTION_FACING = 'W'
+                    elif(left_right ==-1 and front_behind ==-1):
+                        DIRECTION_FACING = DIRECTION_FACING
+                return OLD_DIRECTION, DIRECTION_FACING
+                #now come
+    
 
 
  
@@ -666,28 +793,30 @@ def calculateCamPosition(objects_detected,num_seconds,posFromVO):
             corressponding[matches]= i
             matches= matches +1
 
-    if(matches<2):
+    if(matches<2): #use VO
         print("Could not find at least 2 objects that positions have already been found")
         return (False,new_objects_detected,objects_mid,pos)
 
-    #findCamDirection(new_objects_detected,corressponding)
-    print("Camera Direction: ",DIRECTION_FACING)
-    if(matches==2):#can calculate 2 possible positions for camera
-        print("Can find possible positions")
+    old,new=findCamDirection(new_objects_detected,corressponding)
+    print("Camera Direction: from {0} to {1}".format(old,new))
+
+    pos = calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
+    # if(matches==2):#can calculate 2 possible positions for camera
+    #     print("Can find possible positions")
        
 
-        pos_1,pos_2= calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
-        if(pos_1 == [None,None] or pos_2 == [None,None]):
-            return  (False, new_objects_detected,objects_mid,badPos)
+    #     pos_1,pos_2= calculatePossiblePosition(objects_detected,new_objects_detected,corressponding)
+    #     if(pos_1 == [None,None] or pos_2 == [None,None]):
+    #         return  (False, new_objects_detected,objects_mid,badPos)
        
-        print("Using VO position (of {0}) to find correct pos".format(posFromVO))
-        pos= getAccuratePos(pos_1,pos_2,posFromVO) #now using the feature matcher get the correct position out of the two
-        if(pos==(None,None)):
-            return (False, new_objects_detected,objects_mid,badPos)
-        pos = (pos,distBetweenVectors(pos,[0,0]))
-    else: #more than three corresponding points can find absolute position
-        print("Can find absolute position")
-        pos= calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding)
+    #     print("Using VO position (of {0}) to find correct pos".format(posFromVO))
+    #     pos= getAccuratePos(pos_1,pos_2,posFromVO) #now using the feature matcher get the correct position out of the two
+    #     if(pos==(None,None)):
+    #         return (False, new_objects_detected,objects_mid,badPos)
+    #     pos = (pos,distBetweenVectors(pos,[0,0]))
+    # else: #more than three corresponding points can find absolute position
+    #     print("Can find absolute position")
+    #     pos= calculateAbsolutePosition(objects_detected,new_objects_detected,corressponding)
        
     #found a position at this point
    
@@ -758,6 +887,8 @@ def updateVO():
     global prev_image
     global depth_image
     global prev_depth_image
+    global VO_X
+    global VO_Z
     kp_1, kp_2, matchesMask = vo.detectAndMatch(image,prev_image)
     x_change,z_change=calculateDirectionChanges(kp_1,kp_2,matchesMask,KP_NUM,depth_image,prev_depth_image)
     if(x_change is not None):
@@ -767,7 +898,8 @@ def updateVO():
         print("Not enough key points found to update VO position therefore current Position is unknown, try triangulation to find position")
         VO_X = None
         VO_Z = None
-
+    VO_X= 0
+    VO_Z= 0
     prev_depth_image = depth_image.copy()
     prev_image= image.copy()
     return (VO_X,VO_Z)
@@ -784,11 +916,12 @@ def VOCalculate():
     global prev_depth_image
     global doVO
     global canVO
-
+    global showBlurs
     prev_image= None
     prev_depth_image = None
     KP_NUM = 8 # number of key points to look for direction change
     while(1):
+          
         #get frame data for NS seconds
         #print("VOCalulate")
         if(keyboard.is_pressed('v')):
@@ -826,14 +959,42 @@ def updateObjectDetected(POS,new_objects_detected,object_mids): #update graph
 
         x=  new_objects_detected[i][0][0][0]
         z=  new_objects_detected[i][0][0][1]
+        if(DIRECTION_FACING=='E'):
+            x,z= z,x 
+        elif(DIRECTION_FACING=='W'):
+            x,z= z,x 
+    
 
-        start= new_objects_detected[i][1][0]
+
+        start= new_objects_detected[i][1][0] #start how ever so many cm off the camera's centre
         width= new_objects_detected[i][1][1]
         #now translate coords into absolute coords
-        new_x= POS[0]+x
-        new_z= POS[1]+z
-        start = POS[0]+start #update where to start now
-        dist= int(round(np.sqrt(new_x**2+new_z**2)))
+     
+
+        print("POS:" ,i,x,z)
+        print("Start: ",start)
+
+
+        if(DIRECTION_FACING=='S'):
+            new_x = POS[0] + x
+            new_z = POS[1] - z
+            start = POS[0] + x
+        elif(DIRECTION_FACING=='E'):
+            new_x = POS[0] + x
+            new_z = POS[1] + z
+            start = POS[1] + start
+        elif(DIRECTION_FACING=='W'):
+            new_x = POS[0] - x
+            new_z = POS[1] + z
+            start = POS[1] + start
+    
+        elif(DIRECTION_FACING=='N'):
+            new_x = POS[0] + x
+            new_z = POS[1] + z
+            start = POS[0] + start
+
+        #start = POS[0]+start #update where to start now
+        dist= int(round(np.sqrt(new_x**2+new_z**2)))                                                                                                                                                                                         
         new_pos=([new_x,new_z],dist)
         #x = ((depth_2_xy) * ( IMAGE_CENTRE[0] - x_p))/fx 
         #
@@ -844,15 +1005,19 @@ def updateObjectDetected(POS,new_objects_detected,object_mids): #update graph
         object_mids[i]=[new_mid_x,new_mid_y]
         new_objects_detected[i] = list(new_objects_detected[i]) #tupples are immutable
         new_objects_detected[i][0]= new_pos
+        new_objects_detected[i][1]= (start,width)
         
         if( i not in  object_ids ): # new object
             print("New object (of id {0}) found, absolute coords are: {1} ".format(i,new_pos))
 
             objects_detected[i]=(new_pos,(start,width))
             object_ids.append(i)
-        
-            
+        print("POS:" ,i,new_pos)
+        print("Start: ",start)
+
+    
     graphObjects(new_objects_detected,object_mids)
+    updateDirectionsAndRelations(objects_detected)
     return True
 
 
@@ -873,44 +1038,48 @@ print("Objects Found:",len(objects_detected))
 for i in objects_detected.keys():
     print(i,objects_detected[i])
 
-def updateDirectionsAndRelations(objects_detected,start=False):
+def updateDirectionsAndRelations(objects_detected):
     global mapped
     global relations
     
-    if(start): #FACING NORTH
-        for i in objects_detected.keys():
-            if(i in mapped.keys()): 
+    relations = {}
+    for i in objects_detected.keys():
+        if(i in mapped.keys()): 
+            if(not DIRECTION_FACING in mapped[i]):
                 mapped[i].append(DIRECTION_FACING)
-            else:
-                mapped[i]=[DIRECTION_FACING] #its going to mapped north
-                
-        #now update relations
-        for i in objects_detected.keys():  #{i: (([x,z],dist),(start,width)}  (pos,(start,width))
-            x_i=  objects_detected[i][0][0][0]
-            z_i=  objects_detected[i][0][0][1]
-            start_i= objects_detected[i][1][0]
-            id_i= objects_detected[i][0]
-            for j in objects_detected.keys(): 
-                if(j==i):
-                    continue
-                
-                x_j=  objects_detected[j][0][0][0]
-                z_j=  objects_detected[j][0][0][1]
-                start_j= objects_detected[j][1][0]
-             
-                left_right=1
-                front_behind = 1
-                if ( start_i < start_j ): 
-                    left_right = -1 # i is to the left of j
-                if ( z_i <z_j):  # i is behind j
-                    front_behind=-1
+        else:
+            mapped[i]=[DIRECTION_FACING] #its going to mapped north
 
-                if(i in relations.keys()):
-                    relations[i].append({j:[left_right,front_behind]})
-                else:
-                    
-                    relations[i]= [{j:[left_right,front_behind]}]
+    
+    #now update relations
+
+    for i in objects_detected.keys():  #{i: (([x,z],dist),(start,width)}  (pos,(start,width))
+        x_i=  objects_detected[i][0][0][0]
+        z_i=  objects_detected[i][0][0][1]
+        start_i= objects_detected[i][1][0]
         
+        for j in objects_detected.keys(): 
+            if(j==i):
+                continue
+            
+            x_j=  objects_detected[j][0][0][0]
+            z_j=  objects_detected[j][0][0][1]
+            start_j= objects_detected[j][1][0]
+            
+            left_right=1
+            front_behind = 1
+            if ( start_i < start_j ): 
+                left_right = -1 # i is to the left of j
+            if ( z_i <z_j):  # i is behind j
+                front_behind=-1
+
+            if(i in relations.keys()):
+                relations[i].append({j:[left_right,front_behind]})
+            else:
+                
+                relations[i]= [{j:[left_right,front_behind]}]
+        
+    
     # NOT FACING NORTH
                 
 
@@ -918,10 +1087,11 @@ def updateDirectionsAndRelations(objects_detected,start=False):
 
 #find direction which camera is facing at start camera is facing North
 mapped =  {} #which direction each object has been map
-relations = {} # array of dictionaries holding relationships between each object found
 
-updateDirectionsAndRelations(objects_detected,start=True)
+
+
 graphObjects(objects_detected,obs_mid) #graph current objects
+updateDirectionsAndRelations(objects_detected)
 
 
 #start VO thread
@@ -953,6 +1123,8 @@ while True: #continously get frames and update the camera position
             #update the VO pos
             VO_X = CAM_POS[0][0]
             VO_Z = CAM_POS[0][1]
+            X=  CAM_POS[0][0]
+            Y=  CAM_POS[0][1]
             posFromVO= (VO_X,VO_Z)
             print("Updating VO to: ",posFromVO)
         else: #can triangulate so use reading from VO  
