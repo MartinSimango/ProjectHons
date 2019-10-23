@@ -29,7 +29,7 @@ pipeline.start(config)
 
 #get the instrinsic parameters from the camera
 profile=pipeline.get_active_profile()
-depth_profile=rs.video_stream_profile(profile.get_stream(rs.stream.depth))
+depth_profile=rs.video_stream_profile(profile.get_stream(rs.stream.color))
 depth_intrinsics=depth_profile.get_intrinsics()
 w,h= depth_intrinsics.width, depth_intrinsics.height
 
@@ -37,6 +37,9 @@ w,h= depth_intrinsics.width, depth_intrinsics.height
 depth_sensor= profile.get_device().first_depth_sensor()
 depth_scale = depth_sensor.get_depth_scale()
 
+#for aligning streams
+align_to = rs.stream.color
+align = rs.align(align_to)
 #get camera matrix details
 fx= depth_intrinsics.fx
 fy= depth_intrinsics.fy
@@ -63,7 +66,9 @@ print("Send data!");
 
 
 def sendTriDepth():
-    
+    data=sock.recv(buffer_size) #expect to recieve array of indices to return depth value found in depth_image array
+    jsonData= json.loads(data.decode())
+       
     x1= jsonData.get("x")
     y1= jsonData.get("y")
     
@@ -77,11 +82,16 @@ def sendTriDepth():
 
 
 def sendVODepth():
+    data=sock.recv(buffer_size) #expect to recieve array of indices to return depth value found in depth_image array
+    jsonData= json.loads(data.decode())
+      
+    
     x1= jsonData.get("x1")
     x2= jsonData.get("x2")
     y1= jsonData.get("y1")
     y2= jsonData.get("y2")
-
+    
+    
     depth_1=[]
     depth_2=[]
     for i in range(len(x1)):
@@ -122,12 +132,17 @@ while True:
 #    data= clientSocket.recv(100)
 
     #get frames from camera
-        
     frame=pipeline.wait_for_frames()
-    depth_frame = frame.get_depth_frame()
-    color_frame = frame.get_color_frame()
+    aligned_frames = align.process(frame)
+    depth_frame = aligned_frames.get_depth_frame()
+    color_frame = aligned_frames.get_color_frame()
+
+    if not color_frame or not depth_frame:
+        continue
     #convert images to numpy arrays to send over network
+
     
+
     depth_image= np.asanyarray(depth_frame.get_data())
     color_image= np.asanyarray(color_frame.get_data())
     #gray scale frame
@@ -135,11 +150,6 @@ while True:
     
     #send frame
     sender.send_image(rpiName,gray_image) 
-    if(count%RATE==0 ):
-        prev_depth_image=depth_image.copy()
-    if(count>RATE):
-        count=0
-    count= count+1
-    
+    sender.send_image(rpiName,depth_image)
 
 
