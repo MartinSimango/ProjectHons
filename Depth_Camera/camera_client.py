@@ -9,7 +9,7 @@ import time
 #for threading
 import threading
 import socket
-from queue import Queue
+#from queue import Queue
 
 #some global variables
 
@@ -50,8 +50,8 @@ dist_coeffs= depth_intrinsics.coeffs
 
 
 SERVER_PORT_NUM      = int(sys.argv[2])
-IMAGE_HUB_PORT_NUM   = SERVER_PORT_NUM + 1
-DEPTH_IMAGE_PORT_NUM = SERVER_PORT_NUM + 2 
+IMAGE_HUB_PORT_NUM   = str(SERVER_PORT_NUM + 1)
+DEPTH_IMAGE_PORT_NUM = str(SERVER_PORT_NUM + 2)
 
 #connect to image hub
 address= "tcp://"+HOST_IP+":"+IMAGE_HUB_PORT_NUM
@@ -60,6 +60,7 @@ IMAGE_SENDER = imagezmq.ImageSender(connect_to=address)
 #connect to depth_image hub
 address= "tcp://"+HOST_IP+":"+DEPTH_IMAGE_PORT_NUM 
 DEPTH_IMAGE_SENDER = imagezmq.ImageSender(connect_to=address)
+    
 
 #connect to server
 sock= socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -80,6 +81,7 @@ rpiName = socket.gethostname()
 
 
 def SendDepthImage(depth_image):
+
      DEPTH_IMAGE_SENDER.send_image(rpiName,depth_image)
 
 while True:    
@@ -108,11 +110,12 @@ while True:
     gray_image= cv2.cvtColor(color_image,cv2.COLOR_BGR2GRAY)
     
     #
-    d_thread = threading.Thread(target =SendDepthImage,args=[depth_image])
-    d_thread.start() # start thread
+    # d_thread = threading.Thread(target =SendDepthImage,args=[depth_image])
+    # d_thread.start() # start thread
 
     #send frame
-    IMAGE_SENDER.send_image(rpiName,gray_image) 
+    IMAGE_SENDER.send_image(rpiName,gray_image)
+    DEPTH_IMAGE_SENDER.send_image(rpiName,depth_image)
    
 
     
