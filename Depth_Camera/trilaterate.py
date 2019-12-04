@@ -203,12 +203,55 @@ def getIntersection(x0, y0, r0, x1, y1, r1): #get the intersection between two c
         y4=y2+h*(x1-x0)/d
 
         return (x3, y3, x4, y4)
+def findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3):
+    inter_1_2 = getIntersection(x_1,y_1,d_1,x_2,y_2,d_2)
+    if(inter_1_2 is None): #no intersection found
+     
+        print("OFF_1_2")
+        return None,None
+    #intersection between circle 1 and circle 3
+    inter_1_3 = getIntersection(x_1,y_1,d_1,x_3,y_3,d_3)
+    if(inter_1_3 is None):
+        print("OFF_1_3")
+        return None,None
+    #intersection between circle 2 and circle 3
+    inter_2_3 = getIntersection(x_2,y_2,d_2,x_3,y_3,d_3)
+    if(inter_2_3 is None):
+        print("OFF_2_3")
+        return None,None
+    
+    #get the intersection points
+    px1_12,py1_12,px2_12,py2_12= inter_1_2
+    px1_13,py1_13,px2_13,py2_13= inter_1_3
+    px1_23,py1_23,px2_23,py2_23= inter_2_3
+    
+    point_1_12= np.array([px1_12,py1_12])
+    point_2_12= np.array([px2_12,py2_12])
 
-def trilateratePos(distanceToLandmarks):
+    point_1_13= np.array([px1_13,py1_13])
+    point_2_13= np.array([px2_13,py2_13])
+
+    point_1_23= np.array([px1_23,py1_23])
+    point_2_23= np.array([px2_23,py2_23])
+    
+    #Closest point problem
+    
+    #find closest 3 points
+    points=[point_1_12,point_2_12,point_1_13,point_2_13,point_1_23,point_2_23]
+    p1,p2,p3=findClosest(points)
+
+    x= (p1[0]+p2[0]+p3[0])/3 
+    y= (p1[1]+p2[1]+p3[1])/3
+    return x,y
+def calculateDistToLandmarkFromFurPoint(robot_pos,landmarkPos,furthest_point_dist):
+    
+
+def trilateratePos(distanceToLandmarks,furthest_point_dist):
     x=[]
     y=[]
     z=[]
     d=[]
+    d_2=[]
     x_offsets=[]
     z_offsets=[]
     for id_s in distanceToLandmarks.keys():
@@ -219,7 +262,7 @@ def trilateratePos(distanceToLandmarks):
         d.append(distanceToLandmarks[id_s][0])
         x_offsets.append(distanceToLandmarks[id_s][1])
         z_offsets.append(distanceToLandmarks[id_s][2])
- 
+   
     x_1 = x[0]
     y_1 = y[0]
     z_1 = z[0]
@@ -252,48 +295,38 @@ def trilateratePos(distanceToLandmarks):
    
     #intersection between circle 1 and circle 2
  
-    inter_1_2 = getIntersection(x_1,y_1,d_1,x_2,y_2,d_2)
-    if(inter_1_2 is None): #no intersection found
-     
-        print("OFF_1_2")
+    x,y=findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3)
+    if(x is None):  #could not find the positon
         return None
-    #intersection between circle 1 and circle 3
-    inter_1_3 = getIntersection(x_1,y_1,d_1,x_3,y_3,d_3)
-    if(inter_1_3 is None):
-        print("OFF_1_3")
-        return None
-    #intersection between circle 2 and circle 3
-    inter_2_3 = getIntersection(x_2,y_2,d_2,x_3,y_3,d_3)
-    if(inter_2_3 is None):
-        print("OFF_2_3")
-        return None
-    
-    #get the intersection points
-    px1_12,py1_12,px2_12,py2_12= inter_1_2
-    px1_13,py1_13,px2_13,py2_13= inter_1_3
-    px1_23,py1_23,px2_23,py2_23= inter_2_3
-    
-    point_1_12= np.array([px1_12,py1_12])
-    point_2_12= np.array([px2_12,py2_12])
+   
+    print("POS of robot:",x,y)
 
-    point_1_13= np.array([px1_13,py1_13])
-    point_2_13= np.array([px2_13,py2_13])
 
-    point_1_23= np.array([px1_23,py1_23])
-    point_2_23= np.array([px2_23,py2_23])
+
+    #now compute furthest point coords using trilateration again 
+    distances= []
+    for id_s in distanceToLandmarks.keys():
+        distances.append(calculateDistToLandmarkFromFurPoint((x,y),LANDMARKS[id_s],furthest_point_dist))
+
+    d_1 = d[0]
+    d_2 = d[1]
+    d_3 = d[2]
+
+    f_x,f_y=findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3) #furthest point position
+    if(f_x is None):
+        return None 
+
+    angle = np.arctan2((f_x-x),(f_y-y)),
+    #c= np.arccos(abs(x-x_1)/(d_1))
+    #a= (np.pi/2) - np.arccos(abs(x_1_offset)/d_1)
+    #angle = c-a
+    print("Angle is",np.rad2deg(angle))
+    # still need to check which quadrant it's in
+
+    #return None
+    #angle=np.deg2rad(0)
+    return (x,y,ROBOT_HEIGHT,angle) #robot is at ground level 
     
-    #Closest point problem
-    
-    #find closest 3 points
-    points=[point_1_12,point_2_12,point_1_13,point_2_13,point_1_23,point_2_23]
-    p1,p2,p3=findClosest(points)
-    # print("All points: ",points)
-    # print()
-  
-    #take averages of points
-    x= (p1[0]+p2[0]+p3[0])/3 
-    y= (p1[1]+p2[1]+p3[1])/3
-    print("POS:",x,y)
     #trilatration formula (can't use as measurements are not perfect so might not be intersection)
     # A = 2*x_2 - 2*x_1
     # B = 2*y_2 - 2*y_1
@@ -308,15 +341,7 @@ def trilateratePos(distanceToLandmarks):
     # print("Robot is at:",x,y)
     #now find orientaion of robot (which direction its facing)
     #distance to first landmark (see diagram)
-    c= np.arccos(abs(x-x_1)/(d_1))
-    a= (np.pi/2) - np.arccos(abs(x_1_offset)/d_1)
-    angle = c-a
-    print("Angle is",np.rad2deg(angle))
-    # still need to check which quadrant it's in
-
-    #return None
-    angle=np.deg2rad(0)
-    return (x,y,ROBOT_HEIGHT,angle) #robot is at ground level 
+  
 
 
 

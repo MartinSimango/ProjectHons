@@ -110,8 +110,9 @@ def calculateRobotPos(image,depth_image):
     #look in lookup tables where markers are
     #use depth_image to find distance these marks
     #use triliteration to find pose of robot
-   
-    new_pose=tl.trilateratePos(landmarkDistances)
+    fur_x,fur_y,fur_dist= getFurthest(10,IMAGE_CENTRE[0],depth_image)
+    print("Furthest: ",fur_x,fur_y,fur_dist)
+    new_pose=tl.trilateratePos(landmarkDistances,fur_dist)
     if(new_pose is None): #could not find the robot's pose
         return False,None
 
@@ -125,14 +126,32 @@ def calculateOriginOffset(x_p,y_p,depth_2_xy,fx=None,fy=None):
     y = ((depth_2_xy) * ( IMAGE_CENTRE[1]- y_p ))/fy
 
     return (x,y)
+
+#get furthest point seen in the middle of the camera
+def getFurthest(width,image_center,depth_image):
+    x=None 
+    y=None
+    max_dist=0
+    for i in range(len(depth_image)):#look through all rows
+        for j in range(len(depth_image[0])): #look through columns image_center-width to image_center+1
+            if(j>= image_center-width and  j <= image_center+width ):
+                dist = depth_image[i][j] * DEPTH_SCALE *100 # get to cm's
+                if(dist > max_dist):
+                    x = j
+                    y = i
+                    max_dist=dist 
+            else:
+                continue
+   
+    return x,y, max_dist
 def filterDepthImage(depth_image,map_range):
   
     points = {}
     for i in range(len(depth_image)):
         for j in range(len(depth_image[0])):
             depth_cm =int(depth_image[i][j]) * DEPTH_SCALE *100
-            #y_height = (depth_cm * ( IMAGE_CENTRE[1] - i ) )/FY  # pixel height from the ground #236.63084547568047
-            if((depth_cm> map_range*100)): #or y_height<-14):   #filter out ground and anything futher then dto +2cm
+            y_height = (depth_cm * ( IMAGE_CENTRE[1] - i ) )/FY  # pixel height from the ground #236.63084547568047
+            if((depth_cm> map_range*100) or y_height<-12):   #filter out ground and anything futher then dto +2cm
                 depth_cm=0
             if(depth_cm==0):
                 continue
@@ -150,7 +169,7 @@ def mapEnvironment(robot_pose,points):
 
 
     ax = plt.axes(projection="3d")
-
+    np
     r_x = robot_pose[0]
     r_y = robot_pose[1]
     r_z = robot_pose[2] 
@@ -191,7 +210,7 @@ def mapEnvironment(robot_pose,points):
         z_points.append(y)
 
     print("LEN: ",len(x_points))
-    area = np.pi*5
+    area = 1#np.pi*5
 
     ax.scatter3D(x_points,y_points,z_points,s=area,c=y_points,cmap='hot',alpha=0.5)
     ax.scatter3D(r_x,r_y,0,s=(np.pi*10),c='green')
