@@ -55,7 +55,7 @@ def findMarkers(image): #try finding objects for num_seconds seconds #try findin
     for id_s in object_corners.keys():
         if(not id_s in LANDMARKS.keys()):
             del object_corners[id_s]
-    print("Number Objects found so far: ",len(object_corners))
+    #print("Number Objects found so far: ",len(object_corners))
     return object_corners
 
 def getPoints(xs,ys,NUM_POINTS):
@@ -243,7 +243,27 @@ def findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3):
     x= (p1[0]+p2[0]+p3[0])/3 
     y= (p1[1]+p2[1]+p3[1])/3
     return x,y
-def calculateDistToLandmarkFromFurPoint(robot_pos,landmarkPos,furthest_point_dist):
+def calculateDistToLandmarkFromFurPoint(r_pos,land_pos,dist_to_landmark,furthest_point_dist):
+
+    #shift coords so that robot pos is at the origin
+    a= np.array([0,0])
+    b= land_pos
+    c= np.array([0,furthest_point_dist]) #furthest point
+    
+    BC= b-c
+    BC_MAG= np.linalg.norm(BC)
+    return BC_MAG
+    
+    # AB= a-b
+    # AC= a-c
+    # AC_mag= np.linalg.norm(AC) # should be the same as furthest_point
+    # print("Checking AC_MAG and fur_point_dist",AC_mag,furthest_point_dist)
+    # AB_mag= np.linalg.norm(AB)
+    # #find angle betweem AC and AB (in other words find angle between robot and landmark and robot and furthest point)
+    # angle= np.arccos(np.dot(AB,AC)/(AB_mag*AC_mag))
+
+    #now use law of cosines to find BC 
+    #angle_ab = np.arccos()
     
 
 def trilateratePos(distanceToLandmarks,furthest_point_dist):
@@ -300,26 +320,34 @@ def trilateratePos(distanceToLandmarks,furthest_point_dist):
         return None
    
     print("POS of robot:",x,y)
-
+    #angle=np.deg2rad(0)
+   # return (x,y,ROBOT_HEIGHT,angle) #robot is at ground level 
 
 
     #now compute furthest point coords using trilateration again 
     distances= []
     for id_s in distanceToLandmarks.keys():
-        distances.append(calculateDistToLandmarkFromFurPoint((x,y),LANDMARKS[id_s],furthest_point_dist))
-
-    d_1 = d[0]
-    d_2 = d[1]
-    d_3 = d[2]
+        r_pos=np.array([x,y]) #robot pos
+        
+        l_x = distanceToLandmarks[id_s][1]
+        l_y = np.sqrt(distanceToLandmarks[id_s][0]**2 - l_x**2 )
+        
+        land_pos=np.array([l_x,l_y]) #land_mark pos
+        print("Landmark new pos: ",id_s,land_pos)
+        distances.append(calculateDistToLandmarkFromFurPoint(r_pos,land_pos,distanceToLandmarks[id_s][0],furthest_point_dist))
+    d_1 = distances[0]
+    d_2 = distances[1]
+    d_3 = distances[2]
 
     f_x,f_y=findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3) #furthest point position
     if(f_x is None):
         return None 
 
-    angle = np.arctan2((f_x-x),(f_y-y)),
+    angle = np.arctan2((f_x-x),(f_y-y))
     #c= np.arccos(abs(x-x_1)/(d_1))
     #a= (np.pi/2) - np.arccos(abs(x_1_offset)/d_1)
     #angle = c-a
+    print("Furthest point is at",f_x,f_y)
     print("Angle is",np.rad2deg(angle))
     # still need to check which quadrant it's in
 

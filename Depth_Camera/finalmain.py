@@ -173,7 +173,7 @@ def mapEnvironment(robot_pose,points):
     r_x = robot_pose[0]
     r_y = robot_pose[1]
     r_z = robot_pose[2] 
-    angle= -robot_pose[3]
+    angle= robot_pose[3]
     
     
     #rotate bases vector by angle then solve for robot pose in new rotate basis coords
@@ -192,7 +192,7 @@ def mapEnvironment(robot_pose,points):
     count=0
     for x,y in points.keys():
         count = count +1
-        if(count%20!=0):
+        if(count%10!=0):
             continue
         #calculate new point position in terms of new_basis
         new_X = temp_robot_pos[0,0] + x 
