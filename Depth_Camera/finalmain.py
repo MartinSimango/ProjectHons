@@ -36,6 +36,7 @@ MAP_RANGE = 2 # how many meters should the depth map see up to
 IMAGE_LOCK = threading.Lock()
 ROBOT_POSE_KNOWN = False
 
+TRI_TIMES=0
 #FOR PLOOTING
 plt.ion() #allow plt to be continously updated
 FIG=plt.figure()
@@ -83,13 +84,15 @@ def calculateRobotPos(image,depth_image):
     #todo 
     #FIND MARKERS
     
-    num_seconds= 3 #give 3 seconds to find markers
+    num_seconds= 1 #give 3 seconds to find markers
     start_time= time.time()
     landmarksFound={}
     while(True):
         landmarksFound = tl.findMarkers(image)
+       
         if(time.time()-start_time >num_seconds or len(landmarksFound)>2): #time is up stop trying to triangulate and switch to something eles 
             break
+        getNextFrame()
     if(len(landmarksFound)<3):
         print("Could not find 2 or more landmarks. Please move robot")
         return False, None
@@ -104,13 +107,13 @@ def calculateRobotPos(image,depth_image):
         d,mid_x,mid_y = landmarkDistances[id_s] #convert the pixels into cm's
        
         focal_average.append(focals[id_s])
-        x_offset,y_offset= calculateOriginOffset(mid_x,mid_y,d,focals[id_s],focals[id_s])
+        x_offset,y_offset= calculateOriginOffset(mid_x,mid_y,d)#focals[id_s],focals[id_s])
         landmarkDistances[id_s] = (d,x_offset,y_offset) 
-        print("Landmark distances:",id_s,landmarkDistances[id_s])
+        print("Landmark distances:",id_s,landmarkDistances[id_s],np.sqrt(d**2-x_offset**2))
     #look in lookup tables where markers are
     #use depth_image to find distance these marks
     #use triliteration to find pose of robot
-    fur_x,fur_y,fur_dist= getFurthest(10,IMAGE_CENTRE[0],depth_image)
+    fur_x,fur_y,fur_dist= getFurthest(5,int(CX),int(CY),depth_image)
     print("Furthest: ",fur_x,fur_y,fur_dist)
     new_pose=tl.trilateratePos(landmarkDistances,fur_dist)
     if(new_pose is None): #could not find the robot's pose
@@ -122,28 +125,37 @@ def calculateOriginOffset(x_p,y_p,depth_2_xy,fx=None,fy=None):
         fx=FX
     if(fy is None):
         fy=FY
-    x = ((depth_2_xy) * ( x_p - IMAGE_CENTRE[0] ))/fx
-    y = ((depth_2_xy) * ( IMAGE_CENTRE[1]- y_p ))/fy
+    x = ((depth_2_xy) * ( (x_p - CX) ))/fx
+    y = ((depth_2_xy) * ( - (y_p-CY) ))/fy
 
     return (x,y)
 
 #get furthest point seen in the middle of the camera
-def getFurthest(width,image_center,depth_image):
+def getFurthest(width,image_center_x,image_center_y,depth_image):
     x=None 
     y=None
     max_dist=0
-    for i in range(len(depth_image)):#look through all rows
-        for j in range(len(depth_image[0])): #look through columns image_center-width to image_center+1
-            if(j>= image_center-width and  j <= image_center+width ):
-                dist = depth_image[i][j] * DEPTH_SCALE *100 # get to cm's
-                if(dist > max_dist):
-                    x = j
-                    y = i
-                    max_dist=dist 
-            else:
-                continue
+    return 0,0,300
+    for i in range(width):
+        for j in range(width):
+            dist_1 = depth_image[image_center_y+i][image_center_x+j] * DEPTH_SCALE *100 # get to cm's
+            dist_2 = depth_image[image_center_y-i][image_center_x+j] * DEPTH_SCALE *100 # get to cm's
+            dist_3 = depth_image[image_center_y+i][image_center_x-j] * DEPTH_SCALE *100 # get to cm's
+            dist_4 = depth_image[image_center_y+i][image_center_x-j] * DEPTH_SCALE *100 # get to cm's
+            dist = max(dist_1,dist_2,dist_3,dist_4)
+            if(dist>max_dist):
+                max_dist=dist
+           
+    # for i in range(len(depth_image)):#look through all rows
+    #     for j in range(len(depth_image[0])): #look through columns image_center-width to image_center+1
+    #         if(j>= image_center_x-width and  j <= image_center_x+width ):
+    #             dist = depth_image[i][j] * DEPTH_SCALE *100 # get to cm's
+    #             if(dist>max_dist):
+    #                 max_dist=dist
+    #         else:
+    #             continue
    
-    return x,y, max_dist
+    return x,y, 200
 def filterDepthImage(depth_image,map_range):
   
     points = {}
@@ -161,20 +173,20 @@ def filterDepthImage(depth_image,map_range):
             points[x,y]=depth_cm
             #points[int(x),int(y)]=depth_cm
     return points
+
+
 x_points=[]
 y_points=[]
 z_points=[]
-
-def mapEnvironment(robot_pose,points):
-
-
+def mapEnvironment(robot_pose,points,add_to_angle):
+    global TRI_TIMES
     ax = plt.axes(projection="3d")
-    np
+   
     r_x = robot_pose[0]
     r_y = robot_pose[1]
     r_z = robot_pose[2] 
-    angle= robot_pose[3]
-    
+    angle= -(robot_pose[3])
+    #angle= abs(angle )
     
     #rotate bases vector by angle then solve for robot pose in new rotate basis coords
     # from to robot's pos positions then translate them back to normal coords
@@ -190,29 +202,51 @@ def mapEnvironment(robot_pose,points):
     rob_pos.shape=(2,1)
     temp_robot_pos= new_basis_inv*rob_pos #robot coords in new basis
     count=0
+    new_x_points=[]
+    new_y_points=[]
+    new_z_points=[]
+
+    # if(TRI_TIMES==0):
     for x,y in points.keys():
         count = count +1
-        if(count%10!=0):
+        if(count%70!=0):
+            #count=0
             continue
         #calculate new point position in terms of new_basis
-        new_X = temp_robot_pos[0,0] + x 
-        new_Y = temp_robot_pos[1,0] + points[x,y]
-       # print("New",new_X,new_Y)
-        temp_pos= np.array([new_X,new_Y])
-        temp_pos.shape=(2,1)
+        XY= np.array([x,points[x,y]])
+        XY.shape=(2,1)
+        rotated_XY= rotMatrix*XY
+        rotated_trans_X = rotated_XY[0,0] + r_x
+        rotated_trans_Y = rotated_XY[1,0] + r_y
 
-        #now translate vector back into normal basis
-        true_pos = new_basis * temp_pos
-
-        #print("T",true_pos)
-        x_points.append(true_pos[0,0])
-        y_points.append(true_pos[1,0])
+    
+        x_points.append(rotated_trans_X)
+        y_points.append(rotated_trans_Y)
         z_points.append(y)
+
+        # for x,y in points.keys():
+        # count = count +1
+        # if(count%10!=0):
+        #     #count=0
+        #     continue
+        # #calculate new point position in terms of new_basis
+        # XY= np.array([x,points[x,y]])
+        # XY.shape=(2,1)
+        # rotated_XY= rotMatrix*XY
+        # rotated_trans_X = rotated_XY[0,0] + r_x
+        # rotated_trans_Y = rotated_XY[1,0] + r_y
+
+    
+        new_x_points.append(rotated_trans_X)
+        new_y_points.append(rotated_trans_Y)
+        new_z_points.append(y)
 
     print("LEN: ",len(x_points))
     area = 1#np.pi*5
-
-    ax.scatter3D(x_points,y_points,z_points,s=area,c=y_points,cmap='hot',alpha=0.5)
+    
+    ax.scatter3D(x_points,y_points,z_points,s=area,color='black')
+  #  ax.scatter3D(x_points,y_points,z_points,s=area,c=y_points,cmap='hot',alpha=0.5)
+    #ax.scatter3D(new_x_points,new_y_points,new_z_points,s=area,color='purple')
     ax.scatter3D(r_x,r_y,0,s=(np.pi*10),c='green')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
@@ -251,6 +285,8 @@ IMAGE_HUB = imagezmq.ImageHub(open_port=port)
 #depthImageHub = imagezmq.ImageHub(open_port=port)
 
 
+def getFromUser():
+    return float(input("What angle to add?"))
 
 IMAGE= None
 DEPTH_IMAGE=None
@@ -258,6 +294,7 @@ def ImageThread():
     global IMAGE,DEPTH_IMAGE
     global ROBOT_POSE
     global ROBOT_POSE_KNOWN
+    global TRI_TIMES
     while True:
         #if(ROBOT_POSE_KNOWN):
         #    IMAGE_LOCK.acquire()
@@ -274,18 +311,27 @@ def ImageThread():
         if(key_pressed==ord('q')): 
             break
         elif(key_pressed==ord('t')):
+            
             ROBOT_POSE_KNOWN,ROBOT_POSE=calculateRobotPos(IMAGE,DEPTH_IMAGE) 
+            
             #ROBOT_POSE_KNOWN,ROBOT_POSE=True,(0,0,0,0)
             if(ROBOT_POSE_KNOWN):
+                add_to_angle=0
+                # if(TRI_TIMES == 1):
+                #     #plt.ioff() #allow plt to NOT be continously updated  
+                #     add_to_angle= getFromUser()
+                #     print("Gonna add ",add_to_angle)
+
                 print("Found robot pose, robot pose: ",ROBOT_POSE)
                 print("Now time to map!")
                 print("Starting to map!")
                 points= filterDepthImage(DEPTH_IMAGE,MAP_RANGE)
                 print("OK")
-                mapEnvironment(ROBOT_POSE,points)
+                mapEnvironment(ROBOT_POSE,points,add_to_angle)
                 print("Finished mapping")
-                ROBOT_POSE_KNOWN=False     
-            
+                ROBOT_POSE_KNOWN=False 
+                TRI_TIMES = 1    
+             
             else:
                 print("Could not find robots pose!\nPlease move the robot!") 
                 #don't release lock

@@ -11,14 +11,25 @@ arucoSquareDimension= 0.065 #length of side of square on aruco marker
 #lookup table which stores positions of landmarks
 LANDMARKS={}
 LANDMARKS[0]= [0,0,0]
-LANDMARKS[1]= [-31.5,-16.7,0]
-LANDMARKS[2]= [-71.5,-47.5,0]
-LANDMARKS[3]= [0,0,0]
-LANDMARKS[4]= [0,0,0]
-LANDMARKS[5]= [0,0,0]
-LANDMARKS[6]= [0,0,0]
-LANDMARKS[7]= [0,0,0]
+LANDMARKS[1]= [-29,-16.5,0]
+LANDMARKS[2]= [-108.5,-72,0]
+#LANDMARKS[3]= [-,-16.5,0]
 
+LANDMARKS[4]= [-100,-105,0]
+LANDMARKS[5]= [-114,-147,0]
+LANDMARKS[6]= [-100,-118,0]
+LANDMARKS[7]= [-62,-16.5,0]
+LANDMARKS[8]= [-84,-36,0]  
+LANDMARKS[9]= [-84,-191,0] 
+LANDMARKS[10]=[-52,-205,0] 
+LANDMARKS[11]=[6,-183,0] 
+LANDMARKS[12]=[-21,-205,0]
+LANDMARKS[13]=[29,-31,0] 
+LANDMARKS[14]=[73,-60,0] 
+LANDMARKS[15]=[84,-86,0] 
+
+
+#DO 5,9 and 10 again
 
 def getCorners(corners): #to give back TL TR BR BL corners for unordered corners 
     maxSum=0
@@ -44,19 +55,18 @@ def findMarkers(image): #try finding objects for num_seconds seconds #try findin
     if(markerID is not None):
         for i in range(len(markerID)):
             #draw the square around makers
-            
             aruco.drawDetectedMarkers(image,markerCorners)
             current_id = markerID[i][0]
             correctedCorners=getCorners(markerCorners[i][0]) #correct order of corners to orientade correctly
             
             object_corners[current_id] = [correctedCorners]
 
-        
+    ret_object_corners={}
     for id_s in object_corners.keys():
-        if(not id_s in LANDMARKS.keys()):
-            del object_corners[id_s]
-    #print("Number Objects found so far: ",len(object_corners))
-    return object_corners
+        if(id_s in LANDMARKS.keys()):
+            ret_object_corners[id_s]=object_corners[id_s]
+    #print("Number Objects found so far: ",len(object_corners),object_corners.keys())
+    return ret_object_corners
 
 def getPoints(xs,ys,NUM_POINTS):
     retPoints=[]
@@ -125,10 +135,9 @@ def getLandmarkDistances(landmarkCorners,depth_image,depth_scale):
       mid_x,mid_y,d=getDepthInfo(landmarkCorners[id_s][0],depth_image,depth_scale)
       TL_x= landmarkCorners[id_s][0][0][0] 
       TR_x= landmarkCorners[id_s][0][1][0]
-      #print("cr", landmarkCorners[id_s][0])
       width=abs(TR_x-TL_x)
       
-      focal= (width*d)/6.5 # focal length in cm's 
+      focal= d/(6.5*width)#(width*d)/6.5 # focal length in cm's 
      
       #print("Focal:",focal)
       if(d!=0):
@@ -139,35 +148,77 @@ def getLandmarkDistances(landmarkCorners,depth_image,depth_scale):
     return distances,focals
 
 #points=[point_1_12,point_2_12,point_1_13,point_2_13,point_1_23,point_2_23]
-
-def findClosest(points):
+def getDistanceToClosestPointToCircle(point,center,r):
+    magAC= np.linalg.norm(np.subtract(point,center))
+    clos_x = center[0]+r*((point[0]-center[0])/magAC)
+    clos_y = center[1]+r*((point[1]-center[1])/magAC)
+    closeset_point=[clos_x,clos_y]
+   
+    return np.linalg.norm(np.subtract(point,closeset_point))
+def findClosest(points,centers,radii):
     #find closest 3 points
+    #first intersection points
+    print(points)
+    mins=[]
+    mins_equal=[]
+    j=0
+    for i in [0,2,4] :
+        diff_1=getDistanceToClosestPointToCircle(points[i],centers[j],radii[j])
+        diff_2=getDistanceToClosestPointToCircle(points[i+1],centers[j],radii[j])
+        # mag_1=np.linalg.norm(points[i])
+        # mag_2=np.linalg.norm(points[i+1])
+        # diff_1= abs(mag_1-radii[j])
+        # diff_2= abs(mag_2-radii[j])
+        j= j+1
+        print("diffs:",diff_1,diff_2)
+        if(abs(diff_1-diff_2)<0.001): #diff_1 and diff_2 are essentially the same
+            mins_equal.append((points[i],points[i+1]))
+            continue
+        if(diff_1<diff_2):
+            mins.append(points[i])
+        else:
+            mins.append(points[i+1])
+       
+    # if(len(mins)!=3):
+    #     p= mins[0]
+    #     for i in range(len(mins_equal)):
+    #         mag_1=np.linalg.norm(np.subtract(mins_equal[i][0],p))
+    #         mag_2=np.linalg.norm(np.subtract(mins_equal[i][1],p))
+    #         if(mag_1<mag_2):
+    #             mins.append(mins_equal[i][0])
+    #         else:
+    #             mins.append(mins_equal[i][1])
 
-    N= len(points)
-    min_dist= None
-    min_p1= None
-    min_p2= None
-    min_p3= None
-    for i in range(N):
-        for j in range(N):
-            if(j==i or j==i+1):
-                continue
-            for k in range(N):
-                if(k==j or k==j+1):
-                    continue
-                dist= np.linalg.norm(points[i]-points[j]) + \
-                      np.linalg.norm(points[i]-points[k]) + \
-                      np.linalg.norm(points[j]-points[k])
+
+    min_p1,min_p2,min_p3=mins
+    print("Mins: ",mins)
 
 
-                p1= points[i]
-                p2= points[j]
-                p3= points[k]
-                if(min_dist is None or dist<min_dist):
-                    min_dist=dist
-                    min_p1= p1
-                    min_p2= p2
-                    min_p3= p3
+    # N= len(points)
+    # min_dist= None
+    # min_p1= None
+    # min_p2= None
+    # min_p3= None
+    # for i in range(N):
+    #     for j in range(N):
+    #         if(j==i or j==i+1):
+    #             continue
+    #         for k in range(N):
+    #             if(k==j or k==j+1):
+    #                 continue
+    #             dist= np.linalg.norm(abs(points[i])-abs(points[j])) + \
+    #                   np.linalg.norm(abs(points[i])-abs(points[k])) + \
+    #                   np.linalg.norm(abs(points[j])-abs(points[k]))
+
+
+    #             p1= points[i]
+    #             p2= points[j]
+    #             p3= points[k]
+    #             if(min_dist is None or dist<min_dist):
+    #                 min_dist=dist
+    #                 min_p1= p1
+    #                 min_p2= p2
+    #                 min_p3= p3
     return min_p1,min_p2,min_p3
     
            
@@ -238,15 +289,15 @@ def findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3):
     
     #find closest 3 points
     points=[point_1_12,point_2_12,point_1_13,point_2_13,point_1_23,point_2_23]
-    p1,p2,p3=findClosest(points)
+    p1,p2,p3=findClosest(points,[[x_3,y_3],[x_2,y_2],[x_1,y_1]],[d_3,d_2,d_1])
 
     x= (p1[0]+p2[0]+p3[0])/3 
     y= (p1[1]+p2[1]+p3[1])/3
     return x,y
-def calculateDistToLandmarkFromFurPoint(r_pos,land_pos,dist_to_landmark,furthest_point_dist):
+def calculateDistToLandmarkFromFurPoint(land_pos,furthest_point_dist):
 
     #shift coords so that robot pos is at the origin
-    a= np.array([0,0])
+    
     b= land_pos
     c= np.array([0,furthest_point_dist]) #furthest point
     
@@ -257,13 +308,17 @@ def calculateDistToLandmarkFromFurPoint(r_pos,land_pos,dist_to_landmark,furthest
     # AB= a-b
     # AC= a-c
     # AC_mag= np.linalg.norm(AC) # should be the same as furthest_point
-    # print("Checking AC_MAG and fur_point_dist",AC_mag,furthest_point_dist)
+    # #print("Checking AC_MAG and fur_point_dist",AC_mag,furthest_point_dist)
     # AB_mag= np.linalg.norm(AB)
     # #find angle betweem AC and AB (in other words find angle between robot and landmark and robot and furthest point)
     # angle= np.arccos(np.dot(AB,AC)/(AB_mag*AC_mag))
 
-    #now use law of cosines to find BC 
-    #angle_ab = np.arccos()
+    # #now use law of cosines to find BC 
+    # BC= np.sqrt(AB_mag**2+AC_mag**2 - 2*AB_mag*AC_mag*np.cos(angle))
+    # print("BC: ",BC)
+    # print("OLD_BC",np.linalg.norm(b-c))
+    #return BC
+ 
     
 
 def trilateratePos(distanceToLandmarks,furthest_point_dist):
@@ -333,8 +388,7 @@ def trilateratePos(distanceToLandmarks,furthest_point_dist):
         l_y = np.sqrt(distanceToLandmarks[id_s][0]**2 - l_x**2 )
         
         land_pos=np.array([l_x,l_y]) #land_mark pos
-        print("Landmark new pos: ",id_s,land_pos)
-        distances.append(calculateDistToLandmarkFromFurPoint(r_pos,land_pos,distanceToLandmarks[id_s][0],furthest_point_dist))
+        distances.append(calculateDistToLandmarkFromFurPoint(land_pos,furthest_point_dist))
     d_1 = distances[0]
     d_2 = distances[1]
     d_3 = distances[2]
@@ -344,6 +398,7 @@ def trilateratePos(distanceToLandmarks,furthest_point_dist):
         return None 
 
     angle = np.arctan2((f_x-x),(f_y-y))
+    #angle = np.arctan2((f_y-y),(f_x-x))
     #c= np.arccos(abs(x-x_1)/(d_1))
     #a= (np.pi/2) - np.arccos(abs(x_1_offset)/d_1)
     #angle = c-a
@@ -352,7 +407,7 @@ def trilateratePos(distanceToLandmarks,furthest_point_dist):
     # still need to check which quadrant it's in
 
     #return None
-    #angle=np.deg2rad(0)
+    #angle=angle+np.deg2rad(-4)
     return (x,y,ROBOT_HEIGHT,angle) #robot is at ground level 
     
     #trilatration formula (can't use as measurements are not perfect so might not be intersection)
