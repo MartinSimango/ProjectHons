@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt # plotting map
 from mpl_toolkits import mplot3d
 
 import threading
-import calibrateFunctions as cf
 import trilaterate as tl
 #lookup table which stores positions of landmarks
 
@@ -135,7 +134,7 @@ def getFurthest(width,image_center_x,image_center_y,depth_image):
     x=None 
     y=None
     max_dist=0
-    return 0,0,300
+    return 0,0,200
     for i in range(width):
         for j in range(width):
             dist_1 = depth_image[image_center_y+i][image_center_x+j] * DEPTH_SCALE *100 # get to cm's
@@ -163,7 +162,7 @@ def filterDepthImage(depth_image,map_range):
         for j in range(len(depth_image[0])):
             depth_cm =int(depth_image[i][j]) * DEPTH_SCALE *100
             y_height = (depth_cm * ( IMAGE_CENTRE[1] - i ) )/FY  # pixel height from the ground #236.63084547568047
-            if((depth_cm> map_range*100) or y_height<-12):   #filter out ground and anything futher then dto +2cm
+            if((depth_cm> map_range*100) or y_height<-14):   #filter out ground and anything futher then dto +2cm
                 depth_cm=0
             if(depth_cm==0):
                 continue
@@ -186,30 +185,22 @@ def mapEnvironment(robot_pose,points,add_to_angle):
     r_y = robot_pose[1]
     r_z = robot_pose[2] 
     angle= -(robot_pose[3])
-    #angle= abs(angle )
-    
-    #rotate bases vector by angle then solve for robot pose in new rotate basis coords
-    # from to robot's pos positions then translate them back to normal coords
-    #
+   
     basis= np.matrix([[1, 0], [0, 1]])
     rotMatrix = np.matrix([[np.cos(angle), -np.sin(angle)], 
                             [np.sin(angle),  np.cos(angle)]])
     new_basis= rotMatrix*basis
     
-    #get robot's position in terms of new basis
-    new_basis_inv=np.linalg.inv(new_basis) 
+  
     rob_pos=np.array([r_x,r_y])
     rob_pos.shape=(2,1)
-    temp_robot_pos= new_basis_inv*rob_pos #robot coords in new basis
+  
     count=0
-    new_x_points=[]
-    new_y_points=[]
-    new_z_points=[]
-
+ 
     # if(TRI_TIMES==0):
     for x,y in points.keys():
         count = count +1
-        if(count%70!=0):
+        if(count%50!=0):
             #count=0
             continue
         #calculate new point position in terms of new_basis
@@ -224,22 +215,7 @@ def mapEnvironment(robot_pose,points,add_to_angle):
         y_points.append(rotated_trans_Y)
         z_points.append(y)
 
-        # for x,y in points.keys():
-        # count = count +1
-        # if(count%10!=0):
-        #     #count=0
-        #     continue
-        # #calculate new point position in terms of new_basis
-        # XY= np.array([x,points[x,y]])
-        # XY.shape=(2,1)
-        # rotated_XY= rotMatrix*XY
-        # rotated_trans_X = rotated_XY[0,0] + r_x
-        # rotated_trans_Y = rotated_XY[1,0] + r_y
-
-    
-        new_x_points.append(rotated_trans_X)
-        new_y_points.append(rotated_trans_Y)
-        new_z_points.append(y)
+       
 
     print("LEN: ",len(x_points))
     area = 1#np.pi*5
@@ -250,9 +226,7 @@ def mapEnvironment(robot_pose,points,add_to_angle):
     ax.scatter3D(r_x,r_y,0,s=(np.pi*10),c='green')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
-    #plt.ylim(-2000, 2000)
-    #plt.xlim(-2000, 2000)
-    #ax.set_zlim(-200,200)
+    
     plt.pause(0.001) # plot non blocking
     
 #start the server socket

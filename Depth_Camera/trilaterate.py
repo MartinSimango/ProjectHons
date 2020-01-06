@@ -155,71 +155,55 @@ def getDistanceToClosestPointToCircle(point,center,r):
     closeset_point=[clos_x,clos_y]
    
     return np.linalg.norm(np.subtract(point,closeset_point))
-def findClosest(points,centers,radii):
+
+def checkBounds(x,y):
+    #robot has to be in this bound
+    if(x<-114 or x > 84):
+        return False
+    if(y< -205 or y > 0):
+        return False
+    return True
+def findClosest(points,centers,radii,check):
     #find closest 3 points
     #first intersection points
     print(points)
     mins=[]
-    mins_equal=[]
+    mins_other=[]
     j=0
     for i in [0,2,4] :
         diff_1=getDistanceToClosestPointToCircle(points[i],centers[j],radii[j])
         diff_2=getDistanceToClosestPointToCircle(points[i+1],centers[j],radii[j])
-        # mag_1=np.linalg.norm(points[i])
-        # mag_2=np.linalg.norm(points[i+1])
-        # diff_1= abs(mag_1-radii[j])
-        # diff_2= abs(mag_2-radii[j])
+
         j= j+1
-        print("diffs:",diff_1,diff_2)
-        if(abs(diff_1-diff_2)<0.001): #diff_1 and diff_2 are essentially the same
-            mins_equal.append((points[i],points[i+1]))
-            continue
         if(diff_1<diff_2):
             mins.append(points[i])
+            mins_other.append(points[i+1])
+
         else:
             mins.append(points[i+1])
+            mins_other.append(points[i])
        
-    # if(len(mins)!=3):
-    #     p= mins[0]
-    #     for i in range(len(mins_equal)):
-    #         mag_1=np.linalg.norm(np.subtract(mins_equal[i][0],p))
-    #         mag_2=np.linalg.norm(np.subtract(mins_equal[i][1],p))
-    #         if(mag_1<mag_2):
-    #             mins.append(mins_equal[i][0])
-    #         else:
-    #             mins.append(mins_equal[i][1])
+   
+    #first point
+    p1,p2,p3=mins
+    x= (p1[0]+p2[0]+p3[0])/3 
+    y= (p1[1]+p2[1]+p3[1])/3
+    
+    #second point
+    p1,p2,p3=mins_other 
+    x_2= (p1[0]+p2[0]+p3[0])/3 
+    y_2= (p1[1]+p2[1]+p3[1])/3
+    if(check==False):
+       
+        return x,y,x_2,y_2
 
+    if(not checkBounds(x,y)):
+        #print("CHANGED!")
+        x=x_2
+        y=y_2
+        
+    return x,y
 
-    min_p1,min_p2,min_p3=mins
-    print("Mins: ",mins)
-
-
-    # N= len(points)
-    # min_dist= None
-    # min_p1= None
-    # min_p2= None
-    # min_p3= None
-    # for i in range(N):
-    #     for j in range(N):
-    #         if(j==i or j==i+1):
-    #             continue
-    #         for k in range(N):
-    #             if(k==j or k==j+1):
-    #                 continue
-    #             dist= np.linalg.norm(abs(points[i])-abs(points[j])) + \
-    #                   np.linalg.norm(abs(points[i])-abs(points[k])) + \
-    #                   np.linalg.norm(abs(points[j])-abs(points[k]))
-
-
-    #             p1= points[i]
-    #             p2= points[j]
-    #             p3= points[k]
-    #             if(min_dist is None or dist<min_dist):
-    #                 min_dist=dist
-    #                 min_p1= p1
-    #                 min_p2= p2
-    #                 min_p3= p3
-    return min_p1,min_p2,min_p3
     
            
 
@@ -254,21 +238,27 @@ def getIntersection(x0, y0, r0, x1, y1, r1): #get the intersection between two c
         y4=y2+h*(x1-x0)/d
 
         return (x3, y3, x4, y4)
-def findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3):
+def findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3,checkVal):
     inter_1_2 = getIntersection(x_1,y_1,d_1,x_2,y_2,d_2)
     if(inter_1_2 is None): #no intersection found
      
         print("OFF_1_2")
+        if(checkVal==False):
+            return None,None,None,None
         return None,None
     #intersection between circle 1 and circle 3
     inter_1_3 = getIntersection(x_1,y_1,d_1,x_3,y_3,d_3)
     if(inter_1_3 is None):
         print("OFF_1_3")
+        if(checkVal==False):
+            return None,None,None,None
         return None,None
     #intersection between circle 2 and circle 3
     inter_2_3 = getIntersection(x_2,y_2,d_2,x_3,y_3,d_3)
     if(inter_2_3 is None):
         print("OFF_2_3")
+        if(checkVal==False):
+            return None,None,None,None
         return None,None
     
     #get the intersection points
@@ -289,11 +279,9 @@ def findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3):
     
     #find closest 3 points
     points=[point_1_12,point_2_12,point_1_13,point_2_13,point_1_23,point_2_23]
-    p1,p2,p3=findClosest(points,[[x_3,y_3],[x_2,y_2],[x_1,y_1]],[d_3,d_2,d_1])
+    return findClosest(points,[[x_3,y_3],[x_2,y_2],[x_1,y_1]],[d_3,d_2,d_1],checkVal)
 
-    x= (p1[0]+p2[0]+p3[0])/3 
-    y= (p1[1]+p2[1]+p3[1])/3
-    return x,y
+
 def calculateDistToLandmarkFromFurPoint(land_pos,furthest_point_dist):
 
     #shift coords so that robot pos is at the origin
@@ -370,7 +358,7 @@ def trilateratePos(distanceToLandmarks,furthest_point_dist):
    
     #intersection between circle 1 and circle 2
  
-    x,y=findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3)
+    x,y=findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3,True)
     if(x is None):  #could not find the positon
         return None
    
@@ -393,16 +381,36 @@ def trilateratePos(distanceToLandmarks,furthest_point_dist):
     d_2 = distances[1]
     d_3 = distances[2]
 
-    f_x,f_y=findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3) #furthest point position
-    if(f_x is None):
+    f_x_1,f_y_1,f_x_2,f_y_2=findPoint(x_1,y_1,d_1,x_2,y_2,d_2,x_3,y_3,d_3,False) #furthest point position
+    if(f_x_1 is None or f_x_2 is None):
         return None 
 
-    angle = np.arctan2((f_x-x),(f_y-y))
+    angle_1 = np.arctan2((f_x_1-x),(f_y_1-y))
+    angle_2 = np.arctan2((f_x_2-x),(f_y_2-y))
     #angle = np.arctan2((f_y-y),(f_x-x))
     #c= np.arccos(abs(x-x_1)/(d_1))
     #a= (np.pi/2) - np.arccos(abs(x_1_offset)/d_1)
     #angle = c-a
-    print("Furthest point is at",f_x,f_y)
+    print("Furthest point is at",f_x_1,f_y_1,f_x_2,f_y_2)
+    dist_1 = np.linalg.norm(np.subtract([x,y],[f_x_1,f_y_1]))
+    dist_2 = np.linalg.norm(np.subtract([x,y],[f_x_2,f_y_2]))
+    gap_1 = abs(dist_1-furthest_point_dist) 
+    gap_2 = abs(dist_2-furthest_point_dist)
+    if(gap_1<gap_2):
+        if(gap_1<50):
+            angle=angle_1
+        else:
+            print("Could not locate furthest point!")
+            return None
+    else:
+        if(gap_2<10):
+            angle=angle_2
+        else:
+            print("Could not locate furthest point!")
+            return None
+
+    #print("DISTANCE: ",dist_1,dist_2)
+    #print("Angle is",np.rad2deg(angle_1),np.rad2deg(angle_2))
     print("Angle is",np.rad2deg(angle))
     # still need to check which quadrant it's in
 
